@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Scan output: reports and observations describe real infrastructure
+reports/
+*.observations.json
+*.sarif
+
+# Key material must never be committed
+*.key
+*.pem
+*.p12
+lab/certs/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tr02102-audit"
+dynamic = ["version"]
+description = "Audit TLS, SSH and IPsec cryptographic configuration against BSI TR-02102."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["security", "cryptography", "tls", "ssh", "ipsec", "bsi", "tr-02102", "compliance", "audit"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Security :: Cryptography",
+    "Typing :: Typed",
+]
+# The core has no runtime dependencies yet. Each one added later must be
+# justified in the pull request and pinned in a hash-locked requirements file.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "mypy==2.3.1",
+    "pytest==9.1.1",
+    "ruff==0.16.9",
+]
+
+[project.scripts]
+tr02102-audit = "tr02102_audit.cli:main"
+
+[project.urls]
+Repository = "https://github.com/maksymkisil2/tr02102-audit"
+Documentation = "https://github.com/maksymkisil2/tr02102-audit/tree/main/docs"
+
+[tool.setuptools.dynamic]
+version = { attr = "tr02102_audit.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+tr02102_audit = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # import order
+    "N",       # naming
+    "UP",      # modern syntax
+    "B",       # likely bugs
+    "S",       # security (bandit rules)
+    "C4",      # comprehensions
+    "SIM",     # simplifications
+    "PTH",     # pathlib over os.path
+    "RUF",     # ruff-specific
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # pytest uses plain assert
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+files = ["src", "tests"]
+mypy_path = "src"
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-markers --strict-config"

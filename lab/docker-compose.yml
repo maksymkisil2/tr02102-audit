@@ -1,0 +1,72 @@
+# Test lab: two TLS servers with known configurations.
+#
+#   tls-good  https://127.0.0.1:8443   modern configuration (expected to pass)
+#   tls-weak  https://127.0.0.1:8444   deliberately weak (expected to fail)
+#
+# Both ports are bound to localhost only. tls-weak is insecure on purpose and
+# must never be reachable from another machine.
+
+name: tr02102-lab
+
+x-tools: &tools
+  image: tr02102-lab-tools:local
+  build:
+    context: .
+    dockerfile: tools.Dockerfile
+
+x-healthcheck: &healthcheck
+  test: ["CMD-SHELL", "nc -z 127.0.0.1 443"]
+  interval: 2s
+  timeout: 2s
+  retries: 15
+
+services:
+  # One-shot job: creates throwaway certificates in a volume, then exits.
+  certs:
+    <<: *tools
+    command: ["sh", "/lab/gen-certs.sh"]
+    network_mode: none
+    volumes:
+      - ./scripts:/lab:ro
+      - certs:/certs
+
+  tls-good:
+    image: nginx:1.28-alpine
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8443:443"
+    volumes:
+      - ./targets/tls-good/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certs:/etc/nginx/certs:ro
+    healthcheck: *healthcheck
+
+  tls-weak:
+    image: nginx:1.28-alpine
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8444:443"
+    volumes:
+      - ./targets/tls-weak/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certs:/etc/nginx/certs:ro
+    healthcheck: *healthcheck
+
+  # Verifies that both targets behave as documented in lab/README.md.
+  # Run with: docker compose -f lab/docker-compose.yml run --rm smoke
+  smoke:
+    <<: *tools
+    profiles: ["smoke"]
+    command: ["sh", "/lab/smoke-test.sh"]
+    volumes:
+      - ./scripts:/lab:ro
+    depends_on:
+      tls-good:
+        condition: service_healthy
+      tls-weak:
+        condition: service_healthy
+
+volumes:
+  certs:

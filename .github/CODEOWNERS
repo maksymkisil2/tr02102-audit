@@ -1,0 +1,4 @@
+# Changes to these paths alter audit results or the build itself, so they
+# always need a review by the owner (threat model: T-03, T-04).
+/policies/   @maksymkisil2
+/.github/    @maksymkisil2
