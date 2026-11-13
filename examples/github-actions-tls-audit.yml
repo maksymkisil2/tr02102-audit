@@ -32,10 +32,12 @@ jobs:
         with:
           python-version: "3.13"
 
+      # @main always installs the latest version. For a reproducible pipeline,
+      # pin a release tag (@v0.1.0) or a commit hash instead.
       - name: Install the scanner
         run: >
           python -m pip install
-          "tr02102-audit @ git+https://github.com/maksymkisil2/tr02102-audit@v0.1.0"
+          "tr02102-audit @ git+https://github.com/maksymkisil2/tr02102-audit@main"
 
       # The step keeps going when findings are reported, so the SARIF file is
       # always uploaded; the job still fails afterwards if something serious
