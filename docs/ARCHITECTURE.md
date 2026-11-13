@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: living document · Covers milestones M0–M5 · Last updated: 2026-11-13
+> Status: living document · Implemented: M0, M1, M1.5 · Last updated: 2026-11-13
 
 ## 1. Purpose
 
@@ -96,23 +96,21 @@ Three record types flow through the tool. Field names below are the contract bet
 }
 ```
 
-**Rule** – one recommendation from the TR, as data. The example shows the schema; rule content, section numbers and validity periods are transcribed from the official TR text in milestone M1 and reviewed rule by rule.
+**Rule** – one recommendation from a standard, as data. The full format, the operators and the procedure for adding a standard are in [STANDARDS.md](STANDARDS.md).
 
 ```yaml
-edition: "2026-01"
-document: "BSI TR-02102-2"
-rules:
-  - id: TLS-PROTO-001
-    title: Legacy protocol versions are not offered
-    reference:
-      section: "<transcribed from the pinned edition>"
+- id: BSI-TLS-01
+  control: protocol-versions
+  title: Only TLS 1.2 and TLS 1.3 are offered
+  severity: high
+  reference: "TR-02102-2, sec. 3.2"
+  check:
     subject: tls.protocol_versions
-    condition:
-      none_of: ["SSL2.0", "SSL3.0", "TLS1.0", "TLS1.1"]
-    severity: high
+    op: subset_of
+    values: [TLS1.2, TLS1.3]
 ```
 
-Conditions use a small fixed set of operators (`all_of`, `any_of`, `none_of`, `subset_of`, `min_value`). There is no expression language and no templating in policy files.
+There is no expression language and no templating in standard files.
 
 **Finding** – the result of applying one rule to one observation:
 
@@ -185,52 +183,78 @@ Every report embeds: tool version, policy edition and SHA-256, UTC timestamp, ta
 
 ## 8. Technology choices
 
-| Concern | Choice | Reason | Since |
-|---|---|---|---|
-| Language | Python 3.13 | Memory-safe, strong typing support, mature security libraries. See [ADR-0001](adr/0001-python-as-implementation-language.md). | M0 |
-| CLI | `argparse` (standard library) | No extra dependency for a small command set | M0 |
-| Tests | pytest, Docker Compose lab | Unit tests, and end-to-end tests against servers with a known configuration | M0 |
-| Quality gates | Ruff (including its bandit rules), mypy in strict mode, pip-audit | Lint, types and dependency audit in CI | M0 |
-| CI hygiene | Actions pinned by commit hash, read-only workflow token, Dependabot | Small supply-chain surface (threat T-04) | M0 |
-| Models | Pydantic v2 | Validation at every component boundary | M1 |
-| X.509 parsing | `cryptography` | Maintained, memory-safe parser | M1 |
-| Policy | YAML via `yaml.safe_load` + JSON Schema | Readable in review, cannot carry code | M1 |
-| Parser tests | Hypothesis | Property-based tests for everything that parses untrusted input | M1 |
-| HTML report | Jinja2 with autoescape | Output encoding by default | M2 |
-| Delivery | Container image, non-root, read-only filesystem | Reproducible run, small blast radius | M2 |
+| Concern | Choice | Reason |
+|---|---|---|
+| Language | Python 3.13 | Memory-safe, strong typing support, mature security libraries. See [ADR-0001](adr/0001-python-as-implementation-language.md). |
+| TLS probing | Own ClientHello builder and parser (standard library only) | A TLS library would hide what the server accepts (section 6) |
+| X.509 parsing | `cryptography` | Maintained, memory-safe parser |
+| Standards | YAML via `yaml.safe_load`, strict validation in `standards/__init__.py` | Readable in review, cannot carry code (T-12); see [STANDARDS.md](STANDARDS.md) |
+| Models | Standard-library dataclasses | Enough for the current size; no extra dependency |
+| CLI | `argparse` | No extra dependency |
+| Web interface | Flask + Jinja2 (autoescape), served by gunicorn | Small, well known, output encoding by default (T-13) |
+| Tests | pytest; end-to-end scans of OpenSSL `s_server`; Docker Compose lab in CI | Facts and verdicts are checked against servers with a known configuration |
+| Quality gates | Ruff (including its bandit rules), mypy in strict mode, pip-audit | Lint, types and dependency audit in CI |
+| Supply chain | Actions pinned by commit hash, read-only workflow token, Dependabot, exact versions in `requirements.txt` | Small supply-chain surface (T-04). Hash-locking is still open. |
+| Delivery | Container image (non-root), Render Blueprint (`render.yaml`) | Reproducible run, one-click hosting |
 
-The package has no runtime dependencies in M0. Each library above is added together with the component that needs it, and from that point all dependencies are pinned in a hash-locked requirements file.
+## 9. Web interface and deployment
 
-## 9. Repository layout
+```mermaid
+flowchart LR
+    browser(["Browser, any device"])
+    subgraph render["Render free web service (Frankfurt)"]
+        web["Flask app<br/>login, CSRF, rate limits"]
+        guard["Target guard<br/>public IPs only, pinned"]
+        jobs["Job queue<br/>2 workers, in memory"]
+        scanner["Scanner + engine"]
+    end
+    target(["Audited endpoint"])
+
+    browser -->|"HTTPS"| web
+    web --> guard --> jobs --> scanner
+    scanner <-->|"TLS probes"| target
+    scanner -->|"report"| web
+```
+
+- The service is the same code as the CLI; the web layer only adds authentication, the target guard and a job queue.
+- Scans run in the background; the report page refreshes until the job is done. The page itself contains no JavaScript, which keeps the Content-Security-Policy at `default-src 'none'`.
+- State (jobs, reports, rate limits) lives in process memory. That fits one free-tier instance and means nothing about scanned systems is stored on disk. Scaling to several instances would need a shared store (for example Redis) for jobs and limits.
+- Without `APP_PASSWORD` the instance runs in demo-only mode: sample reports work, scanning is disabled.
+
+## 10. Repository layout
 
 ```text
 tr02102-audit/
 ├── src/tr02102_audit/
-│   ├── cli.py
-│   ├── models.py            # Observation, Rule, Finding
-│   ├── collectors/          # tls/, x509.py, ssh.py, ipsec.py
-│   ├── policy/              # loader, JSON Schema
-│   ├── engine.py
-│   └── reporters/           # json, sarif, html, cbom
-├── policies/2026-01/        # one YAML file per TR part
+│   ├── cli.py               # scan, evaluate, standards, serve
+│   ├── netguard.py          # target parsing, resolution, SSRF guard
+│   ├── scan.py              # runs collectors, builds the observation
+│   ├── tls/                 # registry.py, wire.py (ClientHello/parsers), prober.py
+│   ├── x509.py              # certificate facts
+│   ├── engine.py            # rules + facts -> findings (pure)
+│   ├── report.py            # report assembly, comparison, text output
+│   ├── standards/           # one YAML file per standard + loader
+│   └── web/                 # Flask app, templates, static, demo observations
 ├── lab/                     # docker-compose.yml and known-bad targets
-├── tests/                   # unit/, integration/
-├── docs/                    # ARCHITECTURE.md, THREAT_MODEL.md, adr/
+├── tests/                   # unit, web and end-to-end tests
+├── docs/                    # ARCHITECTURE.md, THREAT_MODEL.md, STANDARDS.md, adr/
+├── Dockerfile, render.yaml  # container image and hosting
 └── .github/workflows/
 ```
 
-## 10. Milestones
+## 11. Milestones
 
-| Milestone | Scope | Done when |
+| Milestone | Scope | Status |
 |---|---|---|
-| M0 | Repository skeleton, CI, lab with two TLS targets (one good, one deliberately weak) | CI is green, including the lab smoke test |
-| M1 | TLS prober, X.509 analyser, TR-02102-2 policy, JSON report | The weak lab target fails the expected rules, the good one passes |
-| M2 | SARIF and HTML reports, container image, example GitHub Actions workflow | Findings appear in GitHub code scanning |
-| M3 | SSH prober, TR-02102-4 policy | Lab OpenSSH targets produce the expected findings |
-| M4 | strongSwan configuration parser, TR-02102-3 policy | Sample configurations produce the expected findings; no secret appears in any output |
-| M5 | CycloneDX CBOM, post-quantum readiness section | CBOM validates against the CycloneDX schema |
+| M0 | Repository skeleton, CI, lab with two TLS targets | Done |
+| M1 | TLS prober, X.509 analyser, standards engine, JSON and text reports | Done |
+| M1.5 | Several standards side by side (BSI TR-02102-2, Mozilla Intermediate and Modern), web interface, container image, hosting | Done |
+| M2 | SARIF output and GitHub code-scanning example; verified transcription of the BSI rules | Next |
+| M3 | SSH prober, TR-02102-4 rules | Planned |
+| M4 | strongSwan configuration parser, TR-02102-3 rules | Planned |
+| M5 | CycloneDX CBOM, post-quantum readiness section | Planned |
 
-## 11. Related work
+## 12. Related work
 
 The niche is not empty. This project is deliberately small and does not claim to replace the tools below.
 
@@ -243,7 +267,7 @@ The niche is not empty. This project is deliberately small and does not claim to
 
 What this project adds: one lightweight tool for TLS, SSH, IPsec and X.509 under a single guideline family; policy as versioned data with a reference on every rule; stored observations that can be re-evaluated when a new edition appears; CI-native output.
 
-## 12. Decisions
+## 13. Decisions
 
 | Decision | Outcome | Alternative considered | Record |
 |---|---|---|---|

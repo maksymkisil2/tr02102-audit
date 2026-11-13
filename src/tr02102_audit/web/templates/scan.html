@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Scan · tr02102-audit{% endblock %}
+{% block content %}
+<section class="narrow">
+  <h1>New scan</h1>
+  <form method="post" class="form">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label for="target">Server</label>
+    <input id="target" name="target" value="{{ form.target }}" placeholder="example.org or example.org:8443"
+           autocomplete="off" autocapitalize="off" spellcheck="false" required autofocus>
+    <p class="hint">Host name or IP address, optional port (default 443). Only public addresses can be scanned.</p>
+
+    <fieldset>
+      <legend>Evaluate against</legend>
+      {% for s in standards %}
+        <label class="check">
+          <input type="checkbox" name="standard" value="{{ s.id }}" {% if s.id in form.standards %}checked{% endif %}>
+          <span><strong>{{ s.short_name }}</strong> <span class="muted">{{ s.edition }}</span></span>
+        </label>
+      {% endfor %}
+    </fieldset>
+
+    <label class="check confirm">
+      <input type="checkbox" required>
+      <span>I am authorised to test this server.</span>
+    </label>
+    <button class="btn" type="submit">Scan</button>
+  </form>
+  <p class="hint">A scan opens up to a few hundred short connections and usually takes 5–60 seconds.</p>
+</section>
+{% endblock %}

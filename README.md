@@ -4,145 +4,137 @@
 [![Security](https://github.com/maksymkisil2/tr02102-audit/actions/workflows/security.yml/badge.svg)](https://github.com/maksymkisil2/tr02102-audit/actions/workflows/security.yml)
 ![Python 3.13](https://img.shields.io/badge/python-3.13-blue)
 ![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)
-![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)
 
-**Check the cryptographic configuration of TLS, SSH and IPsec services against [BSI TR-02102](https://www.bsi.bund.de/dok/TR-02102-en), with every finding traced to the section of the guideline it comes from.**
+**Audit a server's TLS configuration against BSI TR-02102-2 and other standards side by side, from the command line or a web interface. Every finding cites the section it comes from.**
 
-> **Project status: milestone M0, foundation.** The repository, CI pipeline and test lab are in place. The scanner itself is built in M1, so nothing here audits a server yet. See the [roadmap](#roadmap).
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/maksymkisil2/tr02102-audit)
+
+![Report for a deliberately weak server: verdicts per standard and the comparison matrix](docs/images/report.png)
 
 ## The problem
 
-BSI TR-02102 is the German reference for which cryptographic mechanisms and key lengths to use. It has four parts: general recommendations, TLS, IPsec and SSH. It is revised regularly, and the 2026-01 edition sets end dates for the classical-only use of key agreement (end of 2031) and of signatures (end of 2035).
+[BSI TR-02102](https://www.bsi.bund.de/dok/TR-02102-en) is the German reference for which cryptographic mechanisms and key lengths to use, and under NIS2 it is the practical yardstick for the "state of the art" in Germany. Its tables change every year: the 2026-01 edition sets end dates for classical-only key agreement (end of 2031) and lists every cipher suite and group with a "use up to" year.
 
-Without dedicated tooling, checking a service against it means running a general-purpose scanner and comparing the output with the guideline by hand, then doing it again after the next revision. The result is hard to reproduce and hard to show to an auditor.
+General-purpose TLS scanners show what a server accepts, but comparing that output with the guideline is manual work, has to be repeated after every revision, and ends in a spreadsheet nobody can reproduce. Different standards (BSI, Mozilla, NIST) also disagree in places, and nothing shows where.
 
-## The approach
+## What the tool does
 
-`tr02102-audit` connects to the endpoints you name, records which cryptographic parameters they actually accept, and evaluates those facts against a versioned, machine-readable transcription of the guideline.
+1. **Collects facts.** Hand-built TLS handshakes enumerate exactly which protocol versions, cipher suites and key-exchange groups the server accepts, plus the certificate, DH parameter size, Encrypt-then-MAC and extended master secret. No TLS library sits in between to hide anything.
+2. **Evaluates them against standards.** Each standard is a YAML file of rules. One scan is judged against all of them at once.
+3. **Shows where standards disagree.** The comparison matrix has one row per control and one column per standard. `x25519`, for example, is fine for Mozilla but not among the BSI-recommended groups; TLS 1.2 is acceptable for BSI and Mozilla Intermediate, not for Mozilla Modern.
+
+| Standard | Edition | Rules |
+|---|---|---|
+| BSI TR-02102-2 (TLS) | 2026-01 | 16 |
+| Mozilla Server Side TLS, Intermediate | 5.7 | 13 |
+| Mozilla Server Side TLS, Modern | 5.7 | 9 |
+
+Adding a standard is adding a YAML file: see [docs/STANDARDS.md](docs/STANDARDS.md), which also lists the next candidates (BSI TR-03116-4, NIST SP 800-52r2, PCI DSS 4.0).
+
+> **Transcription status.** All three rule sets are marked *draft* until each rule has been checked line by line against the official document. What has and has not been verified is listed in [docs/STANDARDS.md](docs/STANDARDS.md#current-standards). The tool produces technical evidence for an audit, not a compliance certificate.
+
+## Use it
+
+### Web interface (any device)
+
+Click **Deploy to Render** above. Render asks for one value, `APP_PASSWORD`; everything else is preconfigured in [`render.yaml`](render.yaml) (free plan, Frankfurt region, Docker). After a few minutes the service is at `https://tr02102-audit-….onrender.com`.
+
+- Without signing in: start page, list of standards, and two sample reports.
+- After signing in: scan any public server; the report shows verdicts per standard, the comparison matrix, what the server accepts, and each finding with evidence, reference and fix. Reports can be downloaded as JSON.
+
+The free plan sleeps after inactivity, so the first request after a pause takes up to a minute.
+
+<img src="docs/images/mobile.png" alt="The comparison matrix on a phone" width="300">
+
+### Command line
+
+```bash
+python -m pip install .
+
+tr02102-audit scan example.org                  # all standards, text report
+tr02102-audit scan example.org:8443 -s bsi-tr-02102-2 -f json -o report.json
+tr02102-audit evaluate report.json -s mozilla-modern   # re-judge a stored scan, no network
+tr02102-audit standards                          # list standards
+tr02102-audit serve                              # web interface on 127.0.0.1:8080
+```
+
+Exit codes: `0` no failure at or above `--fail-on` (default `medium`), `1` failures found, `2` scan error or incomplete scan. A pipeline can therefore gate a deployment on the result.
+
+## How it works
 
 ```mermaid
 flowchart LR
-    operator(["Operator or CI job"])
     target(["Audited endpoint"])
-    cfg(["Configuration file"])
-    policy[("Policy files<br/>YAML, pinned TR edition")]
-    out(["Reports and exit code"])
+    collectors["Collectors<br/>TLS prober, X.509"]
+    obs[("Observation<br/>facts only, JSON")]
+    standards[("Standards<br/>YAML rules")]
+    engine["Engine<br/>pure function"]
+    out(["Report<br/>web, text, JSON"])
 
-    subgraph tool["tr02102-audit"]
-        cli["CLI"]
-        collectors["Collectors (facts only)<br/>TLS, X.509, SSH, IPsec"]
-        obs[("Observations<br/>JSON")]
-        engine["Evaluation engine<br/>pure function"]
-        reporters["Reporters<br/>JSON, SARIF, HTML, CBOM"]
-    end
-
-    operator -->|"targets, options"| cli
-    cli --> collectors
-    target <-->|"probes and replies"| collectors
-    cfg -->|"file content"| collectors
-    collectors -->|"facts"| obs
-    obs --> engine
-    policy -->|"rules"| engine
-    engine -->|"findings"| reporters
-    reporters --> out
+    target <-->|"probes"| collectors
+    collectors --> obs --> engine
+    standards --> engine --> out
 ```
 
-Three decisions shape the design:
-
-1. **Facts are separate from judgment.** Collectors only record what an endpoint does. A separate engine decides whether that is acceptable. Stored facts can be re-evaluated later without touching the server again.
-2. **The guideline is data, not code.** Each edition of TR-02102 is a set of YAML files in which every rule cites its section. Supporting a new edition means adding files.
-3. **Inconclusive is never "pass".** A timeout or a dropped connection is reported as inconclusive and fails the run. A network problem cannot turn into a clean audit result.
+- **Enumeration by elimination.** The prober offers all candidates, reads the server's choice from the cleartext ServerHello, removes it and repeats until the server refuses. For TLS 1.3 it sends an empty key share, so the server answers with a HelloRetryRequest that names its preferred group; no key exchange is needed.
+- **Facts are separate from judgment.** Stored observations can be re-evaluated against a new edition of a standard without touching the server again.
+- **Inconclusive is never "pass".** A timeout or reset is reported as unknown and fails the run.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Planned scope
-
-| Area | Guideline part | Milestone |
-|---|---|---|
-| TLS protocol versions, cipher suites, key-exchange groups | TR-02102-2 | M1 |
-| X.509 key sizes and signature algorithms | TR-02102-1, TR-02102-2 | M1 |
-| SARIF and HTML reports, GitHub code scanning integration | – | M2 |
-| SSH key exchange, host keys, ciphers, MACs | TR-02102-4 | M3 |
-| IPsec / IKEv2 proposals from strongSwan configuration | TR-02102-3 | M4 |
-| Cryptographic bill of materials (CycloneDX), post-quantum readiness | TR-02102-1 | M5 |
-
-Out of scope: exploitation, implementation-bug checks, host or port discovery, and any claim of formal compliance.
-
 ## Security of the tool itself
 
-An audit tool parses data from servers it does not control, and people act on its reports. The project therefore starts from a [STRIDE threat model](docs/THREAT_MODEL.md): 13 threats, each with a mitigation and the test that will verify it. Three examples:
+A hosted scanner parses data from servers it does not control and could be misused to probe other people's networks. The [threat model](docs/THREAT_MODEL.md) covers 19 threats with STRIDE; the most important ones:
 
 | Threat | Response |
 |---|---|
-| A certificate field or SSH banner carries script or terminal escape sequences into a report | Every value that came from a target is treated as tainted and encoded for the output format |
-| A policy file is quietly weakened, so a weak server passes | The policy edition and its SHA-256 are embedded in every report; policy changes require owner review |
-| A hostile server stalls or floods the scanner | Timeouts, a per-target deadline and hard size limits on everything read from the network |
+| Server-side request forgery: probing cloud metadata or internal networks through the web service | Every resolved address must be public; the IP is pinned for all probes, so DNS rebinding has no effect |
+| Unauthorised scanning by strangers | Password login with rate limiting, an "I am authorised" confirmation per scan, 10 scans per hour |
+| Script injection through certificate fields | All target data is escaped; the site uses no JavaScript and sends `Content-Security-Policy: default-src 'none'` |
+| Hostile server stalls or floods the scanner | Timeouts, connection and time budget per scan, size limits on every record and message |
+| A standard file is weakened or carries code | `yaml.safe_load`, strict schema validation, SHA-256 of each standard in every report, owner review via CODEOWNERS |
 
-## What exists today
+## Quality
 
-| Path | Content |
-|---|---|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Components, data model, scan sequence, how TLS probing works |
-| [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) | Assets, trust boundaries, STRIDE analysis, residual risks |
-| [`docs/adr/`](docs/adr/) | Architecture decision records |
-| [`lab/`](lab/) | Two TLS servers with known configurations, one modern and one deliberately weak, plus a smoke test |
-| [`src/tr02102_audit/`](src/tr02102_audit/) | Package skeleton: command-line entry point and the exit-code contract |
-| [`.github/workflows/`](.github/workflows/) | CI (lint, strict typing, tests, lab smoke test) and a weekly dependency audit |
-
-## Try the lab
-
-Requires Docker with Compose v2.
-
-```bash
-# start a modern and a deliberately weak TLS server on localhost
-docker compose -f lab/docker-compose.yml up -d
-
-# verify that both behave as documented
-docker compose -f lab/docker-compose.yml run --rm smoke
-
-# stop and delete the generated certificates
-docker compose -f lab/docker-compose.yml down -v
-```
-
-What is deliberately wrong with the weak server is listed in [lab/README.md](lab/README.md).
+- 71 tests, including end-to-end scans of real OpenSSL servers and tests for SSRF, CSRF, login rate limiting and open redirects.
+- CI on every push: Ruff (with security rules), mypy in strict mode, pytest, a Docker Compose lab whose servers are scanned by the CLI, and a container build that is started and probed.
+- Weekly dependency audit; GitHub Actions pinned to commit hashes; read-only workflow token; Dependabot.
+- The container runs as a non-root user.
 
 ## Development
 
-Requires Python 3.13.
-
 ```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-python -m pip install -e ".[dev]"
+python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
+python -m pip install -r requirements.txt -e ".[dev]"
+ruff check . && ruff format --check . && mypy && pytest
 
-ruff check .            # lint, including security rules
-ruff format --check .   # formatting
-mypy                    # strict type-checking
-pytest                  # tests
+# web interface locally, without HTTPS
+APP_PASSWORD=dev SESSION_COOKIE_SECURE=0 tr02102-audit serve
+
+# lab: a modern and a deliberately weak TLS server on localhost
+docker compose -f lab/docker-compose.yml run --rm smoke
+tr02102-audit scan 127.0.0.1:8444
 ```
-
-CI runs the same four commands on every push and pull request. GitHub Actions are pinned to commit hashes and the workflow token is read-only.
 
 ## Roadmap
 
 | Milestone | Scope | Status |
 |---|---|---|
-| M0 | Repository skeleton, CI, lab with two TLS targets | In progress |
-| M1 | TLS prober, X.509 analyser, TR-02102-2 policy, JSON report | Next |
-| M2 | SARIF and HTML reports, example CI integration, container image | Planned |
-| M3 | SSH prober, TR-02102-4 policy | Planned |
-| M4 | strongSwan configuration parser, TR-02102-3 policy | Planned |
-| M5 | CycloneDX CBOM, post-quantum readiness section | Planned |
-
-Each milestone has a "done when" criterion in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#10-milestones).
+| M0 | Repository, CI, test lab | Done |
+| M1 | TLS prober, X.509 analysis, standards engine, CLI | Done |
+| M1.5 | Several standards side by side, web interface, container, hosting | Done |
+| M2 | SARIF output for GitHub code scanning; verified BSI transcription | Next |
+| M3 | SSH prober, BSI TR-02102-4 | Planned |
+| M4 | strongSwan configuration parser, BSI TR-02102-3 | Planned |
+| M5 | CycloneDX cryptographic bill of materials, post-quantum readiness | Planned |
 
 ## Related work
 
-The niche is not empty: TLSAssistant, Greenbone/OpenVAS and BSI TaSK each cover part of this ground. How this project differs is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#11-related-work).
+TLSAssistant, Greenbone/OpenVAS and BSI TaSK each cover part of this ground; how this project differs is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#12-related-work).
 
 ## Responsible use
 
-For auditing systems you own or are permitted to test. See [SECURITY.md](SECURITY.md) for how to report a vulnerability in the tool.
+For systems you own or are permitted to test. See [SECURITY.md](SECURITY.md) for reporting a vulnerability in the tool.
 
 ## Licence
 

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">TLS configuration audit</p>
+  <h1>Check a server's encryption against BSI TR-02102 and other standards.</h1>
+  <p class="lead">The scanner connects to a server, records exactly which protocol versions,
+    cipher suites and key-exchange groups it accepts, and evaluates the result against
+    several standards side by side. Every finding cites the section it comes from.</p>
+  <div class="hero-actions">
+    {% if logged_in %}
+      <a class="btn" href="{{ url_for('scan') }}">Start a scan</a>
+    {% elif scanning_enabled %}
+      <a class="btn" href="{{ url_for('login') }}">Sign in to scan</a>
+    {% endif %}
+    <a class="btn btn-ghost" href="{{ url_for('demo', name='tls-weak') }}">See a sample report</a>
+  </div>
+  {% if not scanning_enabled %}
+    <p class="muted small">Scanning is disabled on this instance (no password configured). The demo reports work.</p>
+  {% endif %}
+</section>
+
+<section class="grid3">
+  <div class="card">
+    <h3>Facts, then judgment</h3>
+    <p>Hand-built TLS handshakes enumerate what the server really accepts. A separate engine
+      evaluates the facts, so one scan can be judged against any number of standards.</p>
+  </div>
+  <div class="card">
+    <h3>Standards as data</h3>
+    <p>Each standard is a YAML file under code review. Adding one needs no code. The comparison view
+      shows where standards agree and where they differ.</p>
+  </div>
+  <div class="card">
+    <h3>Inconclusive is never "pass"</h3>
+    <p>A timeout or dropped connection is reported as inconclusive. Network trouble cannot
+      turn into a clean audit result.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Sample reports</h2>
+  <p class="muted">Recorded against the two servers of the project's test lab.</p>
+  <div class="grid2">
+    {% for name, title in demos.items() %}
+      <a class="card card-link" href="{{ url_for('demo', name=name) }}">
+        <span class="mono">{{ name }}</span>
+        <span class="muted">{{ title }}</span>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+
+<section>
+  <h2>Available standards</h2>
+  <div class="grid3">
+    {% for s in standards %}
+      <div class="card">
+        <p class="eyebrow">{{ s.publisher }}</p>
+        <h3>{{ s.short_name }} <span class="muted small">{{ s.edition }}</span></h3>
+        <p class="small">{{ s.description }}</p>
+        <p class="small muted">{{ s.rules|length }} rules{% if s.transcription == 'draft' %} · draft transcription{% endif %}</p>
+      </div>
+    {% endfor %}
+  </div>
+  <p><a href="{{ url_for('standards_page') }}">All rules and references →</a></p>
+</section>
+{% endblock %}

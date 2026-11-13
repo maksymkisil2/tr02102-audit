@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  {% block head %}{% endblock %}
+  <title>{% block title %}tr02102-audit{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23123b5f'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='%2374e0b5' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="{{ url_for('index') }}">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>tr02102<span class="brand-dim">-audit</span></span>
+      </a>
+      <nav class="nav">
+        <a href="{{ url_for('standards_page') }}">Standards</a>
+        {% if logged_in %}
+          <a href="{{ url_for('scan') }}">Scan</a>
+          <form method="post" action="{{ url_for('logout') }}" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+            <button class="linklike" type="submit">Sign out</button>
+          </form>
+        {% elif scanning_enabled %}
+          <a class="btn btn-small" href="{{ url_for('login') }}">Sign in</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }}" role="alert">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer wrap">
+    <p>tr02102-audit {{ version }} · Apache-2.0 ·
+      <a href="https://github.com/maksymkisil2/tr02102-audit">Source on GitHub</a></p>
+    <p class="muted">For authorised use only: scan systems you own or are permitted to test.
+      Results are technical evidence, not a certificate of compliance.</p>
+  </footer>
+</body>
+</html>

@@ -22,15 +22,20 @@ classifiers = [
     "Topic :: Security :: Cryptography",
     "Typing :: Typed",
 ]
-# The core has no runtime dependencies yet. Each one added later must be
-# justified in the pull request and pinned in a hash-locked requirements file.
-dependencies = []
+# Every runtime dependency is justified in docs/ARCHITECTURE.md (section 8).
+# The container image installs the exact versions from requirements.txt.
+dependencies = [
+    "cryptography>=44",  # X.509 parsing
+    "PyYAML>=6.0",       # standard files (safe_load only)
+    "Flask>=3.1",        # web interface
+]
 
 [project.optional-dependencies]
 dev = [
     "mypy==2.3.1",
     "pytest==9.1.1",
     "ruff==0.16.9",
+    "types-PyYAML",
 ]
 
 [project.scripts]
@@ -48,6 +53,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 tr02102_audit = ["py.typed"]
+"tr02102_audit.standards" = ["*.yaml"]
+"tr02102_audit.web" = ["templates/*.html", "static/*", "demo/*.json"]
 
 [tool.ruff]
 line-length = 100
@@ -70,7 +77,7 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # pytest uses plain assert
+"tests/**" = ["S101", "S104", "S105", "S603", "S607", "E501"]  # pytest asserts; tests start openssl
 
 [tool.mypy]
 strict = true
@@ -78,6 +85,10 @@ python_version = "3.13"
 files = ["src", "tests"]
 mypy_path = "src"
 warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Standards · tr02102-audit{% endblock %}
+{% block content %}
+<section>
+  <h1>Standards</h1>
+  <p class="lead">Each standard is a YAML file in the source repository. Every rule maps to one shared
+    control, which is what makes standards comparable side by side.</p>
+</section>
+
+{% for s in standards %}
+<section class="card">
+  <p class="eyebrow">{{ s.publisher }}</p>
+  <h2>{{ s.title }}</h2>
+  <p class="small muted">Edition {{ s.edition }} · {{ s.rules|length }} rules ·
+    transcription: {{ s.transcription }} · <a href="{{ s.url }}" rel="noopener noreferrer">source</a></p>
+  <p class="small">{{ s.description }}</p>
+  {% if s.transcription == 'draft' %}
+    <p class="note small">Draft transcription: rules still need a line-by-line review against the official document.</p>
+  {% endif %}
+  <div class="table-scroll">
+    <table class="rules">
+      <thead><tr><th>Rule</th><th>Control</th><th>Requirement</th><th>Severity</th><th>Reference</th></tr></thead>
+      <tbody>
+        {% for rule in s.rules %}
+          <tr>
+            <td class="mono nowrap">{{ rule.id }}</td>
+            <td class="nowrap">{{ controls[rule.control] }}</td>
+            <td>{{ rule.title }}</td>
+            <td><span class="sev sev-{{ rule.severity }}">{{ rule.severity }}</span></td>
+            <td class="small muted">{{ rule.reference }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

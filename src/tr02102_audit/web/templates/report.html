@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% set obs = r.observation %}
+{% set t = obs.target %}
+{% set tls = obs.facts.tls %}
+{% set cert = obs.facts.certificate %}
+{% macro badge(status) -%}
+  {%- if status is none -%}<span class="badge badge-none" title="Not covered by this standard">—</span>
+  {%- else -%}<span class="badge badge-{{ status }}">{{ {'pass':'Pass','fail':'Fail','warn':'Warn','inconclusive':'Unknown','not_applicable':'n/a'}[status] }}</span>
+  {%- endif -%}
+{%- endmacro %}
+{% set verdict_text = {'pass':'Conforms','pass_with_warnings':'Conforms with warnings','fail':'Does not conform','incomplete':'Incomplete'} %}
+{% block title %}{{ t.host }}:{{ t.port }} · tr02102-audit{% endblock %}
+{% block content %}
+
+{% if demo %}
+  <div class="note">Sample report: {{ demo_title }}. Recorded with this tool; evaluated live against the current rules.</div>
+{% endif %}
+
+<section class="report-head">
+  <div>
+    <p class="eyebrow">TLS audit report</p>
+    <h1 class="mono break">{{ t.host }}:{{ t.port }}</h1>
+    <p class="muted small">
+      {{ t.ip }} · scanned {{ obs.collected_at|replace('T', ' ')|replace('+00:00', ' UTC') }} ·
+      {{ obs.connections }} connections · {{ obs.duration_s }} s · evaluated {{ r.evaluated_on }}
+    </p>
+  </div>
+  <div class="report-actions">
+    {% if demo %}
+      <a class="btn btn-ghost btn-small" href="{{ url_for('demo_json', name=demo) }}">Download JSON</a>
+    {% elif job_id %}
+      <a class="btn btn-ghost btn-small" href="{{ url_for('job_json', job_id=job_id) }}">Download JSON</a>
+      <a class="btn btn-small" href="{{ url_for('scan') }}">New scan</a>
+    {% endif %}
+  </div>
+</section>
+
+{% if not obs.complete or obs.notes %}
+  <div class="note">
+    {% if not obs.complete %}<strong>The scan did not complete.</strong> Missing values are reported as unknown, never as pass.<br>{% endif %}
+    {% for n in obs.notes %}{{ n }}<br>{% endfor %}
+  </div>
+{% endif %}
+
+<section class="verdicts">
+  {% for ev in r.evaluations %}
+    <div class="verdict verdict-{{ ev.verdict }}">
+      <p class="eyebrow">{{ ev.standard.short_name }} · {{ ev.standard.edition }}</p>
+      <p class="verdict-text">{{ verdict_text[ev.verdict] }}</p>
+      <p class="small">
+        <span class="count count-pass">{{ ev.counts.pass }} pass</span>
+        <span class="count count-fail">{{ ev.counts.fail }} fail</span>
+        <span class="count count-warn">{{ ev.counts.warn }} warn</span>
+        {% if ev.counts.inconclusive %}<span class="count">{{ ev.counts.inconclusive }} unknown</span>{% endif %}
+      </p>
+    </div>
+  {% endfor %}
+</section>
+
+<section>
+  <h2>Comparison</h2>
+  <p class="muted small">One row per control. "—" means the standard has no rule for it.</p>
+  <div class="table-scroll">
+    <table class="matrix">
+      <thead>
+        <tr><th>Control</th>{% for s in r.comparison.standards %}<th>{{ s }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in r.comparison.rows %}
+          <tr><td>{{ row.label }}</td>{% for c in row.cells %}<td>{{ badge(c) }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>What the server accepts</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Protocol versions</h3>
+      <div class="chips">
+        {% for v, state in tls.version_probes.items() %}
+          <span class="chip chip-{{ state }} {% if state == 'accepted' and v in ['SSL3.0','TLS1.0','TLS1.1'] %}chip-bad{% endif %}">{{ v }} <small>{{ state }}</small></span>
+        {% endfor %}
+      </div>
+
+      <h3>Key-exchange groups</h3>
+      {% for key, label in [('tls13','TLS 1.3'), ('tls12','TLS 1.2')] %}
+        {% if tls.groups[key] %}
+          <p class="small"><strong>{{ label }}:</strong>
+            {% for g in tls.groups[key] %}<span class="mono tag">{{ g }}</span>{% endfor %}</p>
+        {% endif %}
+      {% endfor %}
+      {% if tls.dhe_prime_bits %}<p class="small"><strong>DHE prime:</strong> {{ tls.dhe_prime_bits }} bit</p>{% endif %}
+      {% if tls.extended_master_secret is not none %}
+        <p class="small"><strong>Extended master secret:</strong> {{ 'yes' if tls.extended_master_secret else 'no' }}</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>Certificate</h3>
+      {% if cert %}
+        <dl class="facts">
+          <dt>Subject</dt><dd class="break">{{ cert.subject_cn or '—' }}</dd>
+          <dt>Issuer</dt><dd class="break">{{ cert.issuer_cn or '—' }}{% if cert.self_signed %} <span class="tag tag-bad">self-signed</span>{% endif %}</dd>
+          <dt>Key</dt><dd>{{ cert.key_type }} {{ cert.key_bits }} bit{% if cert.curve %} ({{ cert.curve }}){% endif %}</dd>
+          <dt>Signature</dt><dd>{{ cert.signature_algorithm }}</dd>
+          <dt>Valid</dt><dd>{{ cert.not_before[:10] }} → {{ cert.not_after[:10] }} ({{ cert.lifetime_days }} days)</dd>
+          <dt>Trust</dt><dd>{% if cert.trusted %}verified{% elif cert.trusted is none %}unknown{% else %}<span class="tag tag-bad">not trusted</span> {{ cert.trust_error }}{% endif %}</dd>
+          {% if cert.san %}<dt>Names</dt><dd class="break small">{{ cert.san|join(', ') }}</dd>{% endif %}
+        </dl>
+      {% else %}
+        <p class="muted">No certificate was retrieved.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% for key, label in [('tls13','TLS 1.3'), ('tls12','TLS 1.2'), ('tls11','TLS 1.1'), ('tls10','TLS 1.0'), ('ssl3','SSL 3.0')] %}
+    {% if tls.suites[key] %}
+      <details class="card" {% if loop.first %}open{% endif %}>
+        <summary><strong>{{ label }} cipher suites</strong> <span class="muted">({{ tls.suites[key]|length }}, in the server's order of choice)</span></summary>
+        <ul class="suites">
+          {% for name in tls.suites[key] %}
+            {% set i = suite_info(name) %}
+            <li>
+              <span class="mono break">{{ name }}</span>
+              {% if i.broken %}<span class="tag tag-bad">broken</span>{% endif %}
+              {% if not i.forward_secrecy %}<span class="tag tag-bad">no PFS</span>{% endif %}
+              {% if i.cbc %}<span class="tag tag-warn">CBC</span>{% endif %}
+              {% if i.aead %}<span class="tag tag-good">AEAD</span>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+  {% endfor %}
+</section>
+
+<section>
+  <h2>Findings</h2>
+  {% for ev in r.evaluations %}
+    {% set problems = ev.findings|selectattr('status', 'in', ['fail', 'warn', 'inconclusive'])|list %}
+    <details class="card" {% if problems %}open{% endif %}>
+      <summary>
+        <strong>{{ ev.standard.title }}</strong>
+        <span class="muted">({{ problems|length }} to review)</span>
+      </summary>
+      {% if ev.standard.transcription == 'draft' %}
+        <p class="note small">Draft transcription of {{ ev.standard.short_name }}: rules still need a line-by-line review against the official document.</p>
+      {% endif %}
+      <ul class="findings">
+        {% for f in ev.findings|by_status if f.status != 'not_applicable' %}
+          <li class="finding finding-{{ f.status }}">
+            <div class="finding-head">
+              {{ badge(f.status) }}
+              <span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
+              <span class="mono small muted">{{ f.rule_id }}</span>
+              <strong>{{ f.title }}</strong>
+            </div>
+            {% if f.status != 'pass' %}
+              <p class="small">{{ f.message }}</p>
+              {% if f.evidence %}
+                <ul class="evidence">{% for e in f.evidence[:12] %}<li class="mono break">{{ e }}</li>{% endfor %}
+                  {% if f.evidence|length > 12 %}<li class="muted">… and {{ f.evidence|length - 12 }} more</li>{% endif %}
+                </ul>
+              {% endif %}
+              {% if f.remediation %}<p class="small"><strong>Fix:</strong> {{ f.remediation }}</p>{% endif %}
+            {% endif %}
+            <p class="small muted">Reference: {{ f.reference }}</p>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endfor %}
+</section>
+
+<section class="muted small">
+  <p>Observation digest (SHA-256): <span class="mono break">{{ r.observation_sha256 }}</span></p>
+  <p>Black-box scan: it shows what this endpoint accepted at the time of the scan. Servers behind a
+    load balancer may differ.</p>
+</section>
+{% endblock %}

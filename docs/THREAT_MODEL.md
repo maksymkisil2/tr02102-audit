@@ -94,9 +94,24 @@ Risk is a qualitative rating (likelihood × impact) before mitigation: H = high,
 | T-12 | Elevation of privilege | A policy file executes code through unsafe deserialisation or expression evaluation | A3 | H | Safe YAML loader; fixed set of declarative operators; no `eval`, no templating | Test loads a policy with a code-execution payload and expects rejection | M1 |
 | T-13 | Elevation of privilege | Target-controlled strings (certificate subject, SSH banner) inject script into the HTML report or escape sequences into the terminal | A3, A4 | H | Target-derived values are tainted end to end; HTML autoescape and a script-free report with a restrictive Content-Security-Policy; control characters neutralised in terminal and log output; reports built by serialisers, never by string concatenation | Tests with a hostile certificate subject and banner | M2 |
 
+### Web interface (added with the hosted deployment)
+
+The web service adds a new trust boundary, TB4: browsers on the Internet ↔ the hosted service. A hosted scanner is an attractive tool to misuse, so these threats get the strictest treatment.
+
+| ID | Category | Threat | Asset | Risk | Mitigation | Verified by |
+|---|---|---|---|---|---|---|
+| T-14 | Elevation of privilege | Server-side request forgery: a user makes the service probe internal addresses (cloud metadata at 169.254.169.254, the hosting provider's private network, localhost) | A3 | H | Every resolved address must be public (`ipaddress.is_global`, IPv4-mapped IPv6 unwrapped); the host is resolved once and all probes connect to that pinned IP, so DNS rebinding between check and use has no effect | `tests/test_netguard.py`, `tests/test_web.py::test_private_targets_are_refused` |
+| T-15 | Spoofing | Password guessing against the login | A3, A5 | M | Constant-time comparison; 10 attempts per IP per 15 minutes; without `APP_PASSWORD` the instance is demo-only | `test_wrong_password_is_refused_and_rate_limited` |
+| T-16 | Tampering | Cross-site request forgery: another site makes a signed-in browser start scans | A5 | M | Per-session CSRF token on every POST; `SameSite=Lax`, `HttpOnly`, `Secure` session cookie | `test_post_without_csrf_token_is_rejected` |
+| T-17 | Denial of service | Many scans exhaust the free-tier instance or turn it into a load generator | A5 | M | Two scan workers, at most six queued scans, 10 scans per session per hour, per-scan connection and time budget (T-09) | Unit tests of the limiter; job queue bound |
+| T-18 | Information disclosure | Reports of one user are seen by others, or survive longer than needed | A4 | L | Report URLs carry 96-bit random identifiers and require login; reports are kept in memory only, at most 50, and vanish on restart | Code review |
+| T-19 | Spoofing | Open redirect after login sends the user to a phishing page | A3 | L | Only same-site relative paths are accepted as `next` | `test_open_redirect_after_login_is_blocked` |
+
+Response headers on every page: a Content-Security-Policy with `default-src 'none'` (the site uses no JavaScript at all), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `nosniff`, and HSTS over HTTPS.
+
 ## 6. Abuse case: unauthorised scanning
 
-The tool could be pointed at systems the operator has no right to test. It is designed to be a poor fit for that: it has no discovery features, accepts only explicitly named endpoints, sends a small bounded number of ordinary handshakes at low rate, and performs no exploitation. The README and the CLI help state that it is for authorised use only.
+The tool could be pointed at systems the operator has no right to test. It is designed to be a poor fit for that: it has no discovery features, accepts only explicitly named endpoints, sends a small bounded number of ordinary handshakes, and performs no exploitation. The hosted instance additionally requires a password, asks the user to confirm authorisation before every scan, refuses private addresses and rate-limits scans. The README and the CLI help state that it is for authorised use only.
 
 ## 7. Residual risks
 

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block head %}<meta http-equiv="refresh" content="2">{% endblock %}
+{% block title %}Scanning… · tr02102-audit{% endblock %}
+{% block content %}
+<section class="narrow center">
+  <div class="spinner" aria-hidden="true"></div>
+  <h1>Scanning {{ job.target.host }}:{{ job.target.port }}</h1>
+  <p class="muted">Status: {{ job.status }}. This page refreshes automatically.</p>
+</section>
+{% endblock %}

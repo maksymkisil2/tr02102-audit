@@ -1,0 +1,93 @@
+{
+  "format": 1,
+  "tool_version": "0.1.0.dev0",
+  "collector": "tls",
+  "collected_at": "2026-11-13T12:35:55+00:00",
+  "duration_s": 0.02,
+  "connections": 24,
+  "target": {
+    "host": "localhost",
+    "port": 8443,
+    "ip": "127.0.0.1",
+    "sni": "localhost"
+  },
+  "complete": true,
+  "facts": {
+    "tls": {
+      "protocol_versions": [
+        "TLS1.2",
+        "TLS1.3"
+      ],
+      "protocol_versions_inconclusive": [],
+      "version_probes": {
+        "SSL3.0": "refused",
+        "TLS1.0": "refused",
+        "TLS1.1": "refused",
+        "TLS1.2": "accepted",
+        "TLS1.3": "accepted"
+      },
+      "suites": {
+        "tls13": [
+          "TLS_AES_128_GCM_SHA256",
+          "TLS_AES_256_GCM_SHA384"
+        ],
+        "tls12": [
+          "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+          "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
+        ],
+        "tls11": [],
+        "tls10": [],
+        "ssl3": [],
+        "legacy_all": [
+          "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+          "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
+        ]
+      },
+      "suites_without_forward_secrecy": [],
+      "suites_cbc": [],
+      "suites_broken": [],
+      "cbc_without_encrypt_then_mac": [],
+      "extended_master_secret": true,
+      "groups": {
+        "tls12": [
+          "secp256r1",
+          "secp384r1"
+        ],
+        "tls13": [
+          "secp384r1",
+          "secp256r1"
+        ]
+      },
+      "hybrid_pq_groups": [],
+      "dhe_prime_bits": null
+    },
+    "certificate": {
+      "key_type": "EC",
+      "key_bits": 256,
+      "curve": "secp256r1",
+      "signature_algorithm": "ecdsa-with-SHA256",
+      "signature_hash": "sha256",
+      "not_before": "2026-11-13T12:00:20+00:00",
+      "not_after": "2026-12-13T12:00:20+00:00",
+      "lifetime_days": 30,
+      "days_remaining": 29,
+      "expired": false,
+      "not_yet_valid": false,
+      "subject_cn": "tls-good.lab.test",
+      "issuer_cn": "tls-good.lab.test",
+      "self_signed": true,
+      "san": [
+        "tls-good",
+        "localhost",
+        "127.0.0.1"
+      ],
+      "serial": "a6cc7b5e09fb5cb59998906149dbe7cf31264e6",
+      "trusted": false,
+      "trust_error": "self-signed certificate",
+      "chain_length": 1
+    }
+  },
+  "notes": [
+    "TLS1.2 groups: ECDSA certificate, groups tested one by one; a server that prefers its certificate curve may hide others"
+  ]
+}
