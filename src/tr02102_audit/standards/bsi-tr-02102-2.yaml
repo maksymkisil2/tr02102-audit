@@ -13,6 +13,8 @@ description: >
 # reviewed line by line against the full PDF of this edition. See
 # docs/STANDARDS.md for the review procedure.
 transcription: draft
+region: Germany
+order: 1
 
 rules:
   - id: BSI-TLS-01

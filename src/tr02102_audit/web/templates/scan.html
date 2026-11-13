@@ -15,7 +15,7 @@
       {% for s in standards %}
         <label class="check">
           <input type="checkbox" name="standard" value="{{ s.id }}" {% if s.id in form.standards %}checked{% endif %}>
-          <span><strong>{{ s.short_name }}</strong> <span class="muted">{{ s.edition }}</span></span>
+          <span><strong>{{ s.short_name }}</strong> <span class="muted">{{ s.edition }} · {{ s.region }}</span></span>
         </label>
       {% endfor %}
     </fieldset>

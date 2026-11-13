@@ -8,6 +8,8 @@ description: >
   The strictest profile of Mozilla's server-side TLS guidelines: TLS 1.3 only,
   for services whose clients are all modern.
 transcription: draft
+region: International (Mozilla)
+order: 6
 
 rules:
   - id: MOZ-M-01

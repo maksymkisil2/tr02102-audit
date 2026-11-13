@@ -9,6 +9,8 @@ description: >
   the Mozilla SSL Configuration Generator. Recommended for servers that must
   support a wide range of clients.
 transcription: draft
+region: International (Mozilla)
+order: 5
 
 rules:
   - id: MOZ-I-01

@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: living document · Implemented: M0, M1, M1.5 · Last updated: 2026-11-13
+> Status: living document · Implemented: M0, M1, M1.5, M1.6 · Last updated: 2026-11-13
 
 ## 1. Purpose
 
@@ -249,6 +249,7 @@ tr02102-audit/
 | M0 | Repository skeleton, CI, lab with two TLS targets | Done |
 | M1 | TLS prober, X.509 analyser, standards engine, JSON and text reports | Done |
 | M1.5 | Several standards side by side (BSI TR-02102-2, Mozilla Intermediate and Modern), web interface, container image, hosting | Done |
+| M1.6 | International standards (NIST SP 800-52r2, IETF RFC 9325, NCSC-NL 2025-05); phase-out levels in rules | Done |
 | M2 | SARIF output and GitHub code-scanning example; verified transcription of the BSI rules | Next |
 | M3 | SSH prober, TR-02102-4 rules | Planned |
 | M4 | strongSwan configuration parser, TR-02102-3 rules | Planned |

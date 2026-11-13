@@ -42,7 +42,15 @@ def facts(**tls: Any) -> dict[str, Any]:
 
 def test_all_builtin_standards_load() -> None:
     standards = load_builtin()
-    assert {"bsi-tr-02102-2", "mozilla-intermediate", "mozilla-modern"} <= set(standards)
+    assert {
+        "bsi-tr-02102-2",
+        "nist-sp-800-52r2",
+        "ietf-rfc9325",
+        "ncsc-nl-tls-2025",
+        "mozilla-intermediate",
+        "mozilla-modern",
+    } <= set(standards)
+    assert next(iter(standards)) == "bsi-tr-02102-2"  # German reference first
     for s in standards.values():
         assert len(s.sha256) == 64 and s.rules
 
@@ -83,7 +91,9 @@ def test_standards_disagree_where_they_really_differ() -> None:
         D2026,
     )
     row = next(r for r in rep["comparison"]["rows"] if r["control"] == "protocol-versions")
-    assert sorted(row["cells"]) == ["fail", "pass", "pass"]
+    by_std = dict(zip(rep["comparison"]["standards"], row["cells"], strict=True))
+    assert by_std["Mozilla Modern"] == "fail"
+    assert all(v == "pass" for k, v in by_std.items() if k != "Mozilla Modern")
 
 
 def test_x25519_is_a_warning_under_bsi_and_fine_under_mozilla() -> None:
@@ -117,3 +127,47 @@ def test_reevaluation_is_deterministic() -> None:
     assert (
         a["evaluations"] == b["evaluations"] and a["observation_sha256"] == b["observation_sha256"]
     )
+
+
+def _status(std_id: str, rule_id: str, f: dict[str, Any]) -> str:
+    std = load_builtin()[std_id]
+    return next(x.status for x in engine.evaluate(std, f, D2026).findings if x.rule_id == rule_id)
+
+
+def test_chacha20_is_not_fips_approved() -> None:
+    f = facts(suites={"tls13": ["TLS_CHACHA20_POLY1305_SHA256"], "tls12": []})
+    assert _status("nist-sp-800-52r2", "NIST-05", f) == "fail"
+    assert _status("ncsc-nl-tls-2025", "NL-03", f) == "pass"
+    assert _status("mozilla-intermediate", "MOZ-I-03", f) == "pass"
+
+
+def test_rsa_2048_certificate_divides_the_standards() -> None:
+    f = facts()
+    f["certificate"].update(key_type="RSA", key_bits=2048, curve=None)
+    assert _status("bsi-tr-02102-2", "BSI-TLS-12", f) == "fail"  # 3000 bit minimum
+    assert _status("ncsc-nl-tls-2025", "NL-10", f) == "warn"  # to be phased out
+    assert _status("nist-sp-800-52r2", "NIST-10", f) == "pass"
+    assert _status("ietf-rfc9325", "IETF-09", f) == "pass"
+
+
+def test_static_ecdh_is_acceptable_for_nist_only() -> None:
+    suite = "TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256"
+    f = facts(suites={"tls13": [], "tls12": [suite]}, suites_without_forward_secrecy=[suite])
+    assert _status("nist-sp-800-52r2", "NIST-04", f) == "pass"
+    assert _status("ncsc-nl-tls-2025", "NL-05", f) == "fail"
+    assert _status("ietf-rfc9325", "IETF-04", f) == "fail"
+
+
+def test_phase_out_entries_warn() -> None:
+    f = facts(suites={"tls13": [], "tls12": ["TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"]})
+    assert _status("ncsc-nl-tls-2025", "NL-04", f) == "warn"
+
+
+def test_hybrid_post_quantum_is_rewarded_by_ncsc() -> None:
+    f = facts(
+        groups={"tls12": [], "tls13": ["X25519MLKEM768", "x25519"]},
+        hybrid_pq_groups=["X25519MLKEM768"],
+    )
+    assert _status("ncsc-nl-tls-2025", "NL-12", f) == "pass"
+    assert _status("ncsc-nl-tls-2025", "NL-07", f) == "pass"
+    assert _status("nist-sp-800-52r2", "NIST-07", f) == "warn"  # not NIST-approved groups

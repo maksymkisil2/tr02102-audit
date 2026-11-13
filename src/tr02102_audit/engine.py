@@ -59,14 +59,23 @@ def lookup(facts: Mapping[str, Any], path: str) -> Any:
     return node
 
 
-def _allow_list(values: Iterable[Any]) -> dict[str, int | None]:
-    """Normalise ``["a", {"value": "b", "until": 2029}]`` to ``{"a": None, "b": 2029}``."""
-    out: dict[str, int | None] = {}
+@dataclass(frozen=True, slots=True)
+class Allowed:
+    """One entry of an allow-list: optional "use up to" year, optional phase-out flag."""
+
+    until: int | None = None
+    phase_out: bool = False
+
+
+def _allow_list(values: Iterable[Any]) -> dict[str, Allowed]:
+    """Normalise ``["a", {"value": "b", "until": 2029, "phase_out": true}]``."""
+    out: dict[str, Allowed] = {}
     for v in values:
         if isinstance(v, Mapping):
-            out[str(v["value"])] = int(v["until"]) if v.get("until") is not None else None
+            until = int(v["until"]) if v.get("until") is not None else None
+            out[str(v["value"])] = Allowed(until, bool(v.get("phase_out", False)))
         else:
-            out[str(v)] = None
+            out[str(v)] = Allowed()
     return out
 
 
@@ -93,17 +102,20 @@ def check(spec: Mapping[str, Any], facts: Mapping[str, Any], today: date) -> Res
         allowed = _allow_list(spec["values"])
         items = _as_list(subject)
         offending = [i for i in items if i not in allowed]
-        expired = [i for i in items if (u := allowed.get(i)) is not None and u < today.year]
-        expiring = [i for i in items if allowed.get(i) == today.year]
+        expired = [
+            i
+            for i in items
+            if (a := allowed.get(i)) and a.until is not None and a.until < today.year
+        ]
         if offending or expired:
-            bad = offending + [f"{i} (recommended only until {allowed[i]})" for i in expired]
+            bad = offending + [f"{i} (recommended only until {allowed[i].until})" for i in expired]
             return Result("fail", "not covered by the recommendation", bad)
-        if expiring:
-            return Result(
-                "warn",
-                f"allowed only until the end of {today.year}",
-                expiring,
-            )
+        expiring = [i for i in items if (a := allowed.get(i)) and a.until == today.year]
+        phasing_out = [i for i in items if (a := allowed.get(i)) and a.phase_out]
+        if expiring or phasing_out:
+            notes = [f"{i} (allowed only until the end of {today.year})" for i in expiring]
+            notes += [f"{i} (to be phased out)" for i in phasing_out if i not in expiring]
+            return Result("warn", "acceptable for now, but due to be replaced", notes)
         return Result("pass", "all values are covered by the recommendation", items)
 
     if op == "none_of":
@@ -140,7 +152,10 @@ def check(spec: Mapping[str, Any], facts: Mapping[str, Any], today: date) -> Res
 
     if op == "one_of":
         allowed_values = _allow_list(spec["values"])
-        if str(subject) in allowed_values:
+        entry = allowed_values.get(str(subject))
+        if entry is not None and entry.phase_out:
+            return Result("warn", f"{subject} is due to be phased out", [str(subject)])
+        if entry is not None:
             return Result("pass", f"{subject}")
         return Result("fail", f"{subject} is not covered by the recommendation", [str(subject)])
 
@@ -173,6 +188,11 @@ def _key_strength(spec: Mapping[str, Any], cert: Any) -> Result:
     curves = spec.get("curves")
     if key_type == "EC" and curves and cert.get("curve") not in curves:
         return Result("fail", f"curve {cert.get('curve')} is not covered", [label])
+    recommended: Mapping[str, int] = spec.get("recommended_bits", {})
+    if key_type in recommended and bits < recommended[key_type]:
+        return Result(
+            "warn", f"{label}; due to be phased out below {recommended[key_type]} bit", [label]
+        )
     return Result("pass", label)
 
 

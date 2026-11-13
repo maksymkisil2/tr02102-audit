@@ -1,0 +1,247 @@
+id: ncsc-nl-tls-2025
+title: "NCSC-NL: TLS Security Guidelines"
+short_name: NCSC-NL
+publisher: Nationaal Cyber Security Centrum (NCSC-NL)
+edition: "2025-05"
+url: https://english.ncsc.nl/publications/publications/2025/06/26/security-guidelines-for-transport-layer-security-2025-05
+region: Netherlands
+order: 4
+description: >
+  The Dutch national guideline, used in procurement across the Dutch public
+  sector. Every setting is rated Good, Sufficient, To be phased out or
+  Insufficient. Here, Insufficient fails, To be phased out warns, and Good and
+  Sufficient pass. It is the only standard here that rates hybrid
+  post-quantum key exchange as Good.
+# Transcribed from the 2025-05 PDF. Some per-row levels in tables 1, 3 and 9
+# were not legible in the extracted text and were inferred from the stated
+# security-strength thresholds and Appendix A. See docs/STANDARDS.md.
+transcription: draft
+
+rules:
+  - id: NL-01
+    control: protocol-versions
+    title: Only TLS 1.3 (Good) and TLS 1.2 (Sufficient)
+    severity: high
+    reference: "NCSC-NL 2025-05, sec. 3.3.1 (TLS 1.1 and below: Insufficient)"
+    check:
+      subject: tls.protocol_versions
+      op: subset_of
+      values: [TLS1.3, TLS1.2]
+    remediation: Disable everything below TLS 1.2.
+
+  - id: NL-02
+    control: tls13-support
+    title: TLS 1.3 is offered
+    severity: low
+    on_violation: warn
+    reference: "NCSC-NL 2025-05, sec. 3.3.1 (only TLS 1.3 is Good)"
+    check:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.3
+    remediation: Enable TLS 1.3; TLS 1.2 is rated only Sufficient.
+
+  - id: NL-03
+    control: tls13-cipher-suites
+    title: TLS 1.3 cipher suites are Good or Sufficient
+    severity: high
+    reference: "NCSC-NL 2025-05, Appendix B; sec. 3.3.4, Table 8 (CCM_8: Insufficient)"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.3
+    check:
+      subject: tls.suites.tls13
+      op: subset_of
+      values: [TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_AES_128_GCM_SHA256, TLS_AES_128_CCM_SHA256]
+    remediation: Remove TLS_AES_128_CCM_8_SHA256 (64-bit integrity tag).
+
+  - id: NL-04
+    control: tls12-cipher-suites
+    title: TLS 1.2 cipher suites are not Insufficient
+    severity: high
+    reference: "NCSC-NL 2025-05, Appendix B"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.2
+    check:
+      subject: tls.suites.tls12
+      op: subset_of
+      values:
+        # Sufficient
+        - TLS_ECDHE_ECDSA_WITH_AES_128_CCM
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_CCM
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+        # To be phased out
+        - {value: TLS_DHE_RSA_WITH_AES_128_CBC_SHA256, phase_out: true}
+        - {value: TLS_DHE_RSA_WITH_AES_128_CCM, phase_out: true}
+        - {value: TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, phase_out: true}
+        - {value: TLS_DHE_RSA_WITH_AES_256_CBC_SHA256, phase_out: true}
+        - {value: TLS_DHE_RSA_WITH_AES_256_CCM, phase_out: true}
+        - {value: TLS_DHE_RSA_WITH_AES_256_GCM_SHA384, phase_out: true}
+        - {value: TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256, phase_out: true}
+        - {value: TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, phase_out: true}
+        - {value: TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384, phase_out: true}
+        - {value: TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, phase_out: true}
+        - {value: TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384, phase_out: true}
+    remediation: >
+      Keep ECDHE with AES-GCM, AES-CCM or ChaCha20-Poly1305. Plan to remove
+      DHE and CBC suites; remove SHA-1 based, static-key and CCM_8 suites now.
+
+  - id: NL-05
+    control: forward-secrecy
+    title: No RSA, static DH or static ECDH key exchange
+    severity: high
+    reference: "NCSC-NL 2025-05, sec. 3.3.3, Table 6 (Insufficient)"
+    check:
+      subject: tls.suites_without_forward_secrecy
+      op: empty
+    remediation: Remove TLS_RSA_* and static (EC)DH cipher suites.
+
+  - id: NL-06
+    control: broken-ciphers
+    title: No 3DES, RC4, DES, NULL, export or anonymous suites
+    severity: high
+    reference: "NCSC-NL 2025-05, sec. 3.3.2, Table 2 and sec. 3.3.4, Table 8 (Insufficient)"
+    check:
+      subject: tls.suites_broken
+      op: empty
+    remediation: Remove these cipher suites.
+
+  - id: NL-07
+    control: key-exchange-groups
+    title: TLS 1.3 groups are not Insufficient
+    severity: medium
+    reference: "NCSC-NL 2025-05, sec. 3.3.3, Tables 3 and 7"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.3
+    check:
+      subject: tls.groups.tls13
+      op: subset_of
+      values:
+        - X25519MLKEM768
+        - SecP256r1MLKEM768
+        - SecP384r1MLKEM1024
+        - secp256r1
+        - secp384r1
+        - secp521r1
+        - x25519
+        - x448
+        - brainpoolP256r1tls13
+        - brainpoolP384r1tls13
+        - brainpoolP512r1tls13
+        - {value: ffdhe3072, phase_out: true}
+        - {value: ffdhe4096, phase_out: true}
+        - {value: ffdhe6144, phase_out: true}
+        - {value: ffdhe8192, phase_out: true}
+    remediation: Remove ffdhe2048 (Insufficient); plan to drop finite-field groups (DHE is to be phased out).
+
+  - id: NL-08
+    control: key-exchange-groups
+    title: TLS 1.2 curves are not Insufficient
+    severity: medium
+    reference: "NCSC-NL 2025-05, sec. 3.3.3, Table 3"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.2
+    check:
+      subject: tls.groups.tls12
+      op: subset_of
+      values:
+        - secp256r1
+        - secp384r1
+        - secp521r1
+        - x25519
+        - x448
+        - brainpoolP256r1
+        - brainpoolP384r1
+        - brainpoolP512r1
+        - {value: secp224r1, phase_out: true}
+    remediation: Use secp256r1, secp384r1, x25519 or Brainpool curves.
+
+  - id: NL-09
+    control: dh-parameters
+    title: Finite-field DH of at least 3072 bit
+    severity: high
+    reference: "NCSC-NL 2025-05, sec. 3.3.3, Table 7 (ffdhe2048: Insufficient)"
+    when:
+      subject: tls.dhe_prime_bits
+      op: present
+    check:
+      subject: tls.dhe_prime_bits
+      op: min
+      value: 3072
+    remediation: Use ffdhe3072 or larger, or remove DHE suites.
+
+  - id: NL-10
+    control: certificate-key
+    title: Certificate key is Sufficient
+    severity: high
+    reference: "NCSC-NL 2025-05, sec. 3.3.2, Tables 3 to 5 (RSA 2048-3071: to be phased out)"
+    check:
+      subject: certificate
+      op: key_strength
+      min_bits: {RSA: 2048, EC: 256, Ed25519: 256, Ed448: 448}
+      recommended_bits: {RSA: 3072}
+    remediation: Use RSA with at least 3072 bit, or ECDSA on P-256 or larger.
+
+  - id: NL-11
+    control: certificate-signature
+    title: Certificate signature hash is Sufficient
+    severity: high
+    reference: "NCSC-NL 2025-05, sec. 3.3.5, Table 9 (SHA-1, MD5: Insufficient)"
+    when:
+      subject: certificate.signature_hash
+      op: present
+    check:
+      subject: certificate.signature_hash
+      op: one_of
+      values: [sha256, sha384, sha512, {value: sha224, phase_out: true}]
+    remediation: Re-issue the certificate with SHA-256 or stronger.
+
+  - id: NL-12
+    control: post-quantum
+    title: Hybrid post-quantum key exchange is offered (Good)
+    severity: info
+    on_violation: warn
+    reference: "NCSC-NL 2025-05, sec. 3.3.3, Table 6 (hybrid groups: Good; ECDHE: Sufficient)"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.3
+    check:
+      subject: tls.hybrid_pq_groups
+      op: not_empty
+    remediation: Offer X25519MLKEM768 or SecP256r1MLKEM768 in addition to classical groups.
+
+  - id: NL-13
+    control: certificate-validity
+    title: Certificate is within its validity period
+    severity: high
+    reference: "General requirement for server authentication"
+    check:
+      subject: certificate.expired
+      op: is
+      value: false
+    remediation: Renew the certificate.
+
+  - id: NL-14
+    control: certificate-trust
+    title: Certificate chain and host name verify
+    severity: medium
+    reference: "General requirement for server authentication"
+    check:
+      subject: certificate.trusted
+      op: is
+      value: true
+      detail: certificate.trust_error
+    remediation: Use a certificate from a trusted CA that covers the host name, and send the full chain.

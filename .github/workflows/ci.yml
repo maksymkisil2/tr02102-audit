@@ -66,7 +66,10 @@ jobs:
       # tls-good may only fail on its self-signed certificate (medium severity).
       # Mozilla Modern is left out: it rejects TLS 1.2, which tls-good offers.
       - name: Scan tls-good (expected to pass at --fail-on high)
-        run: tr02102-audit scan 127.0.0.1:8443 -s bsi-tr-02102-2 -s mozilla-intermediate --fail-on high
+        run: >
+          tr02102-audit scan 127.0.0.1:8443 --fail-on high
+          -s bsi-tr-02102-2 -s nist-sp-800-52r2 -s ietf-rfc9325
+          -s ncsc-nl-tls-2025 -s mozilla-intermediate
 
       - name: Scan tls-weak (expected to fail)
         run: |

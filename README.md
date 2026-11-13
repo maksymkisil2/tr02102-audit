@@ -5,7 +5,7 @@
 ![Python 3.13](https://img.shields.io/badge/python-3.13-blue)
 ![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)
 
-**Audit a server's TLS configuration against BSI TR-02102-2 and other standards side by side, from the command line or a web interface. Every finding cites the section it comes from.**
+**Audit a server's TLS configuration against six national and international standards side by side (BSI TR-02102-2, NIST SP 800-52r2, IETF RFC 9325, NCSC-NL, Mozilla), from the command line or a web interface. Every finding cites the section it comes from.**
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/maksymkisil2/tr02102-audit)
 
@@ -21,17 +21,29 @@ General-purpose TLS scanners show what a server accepts, but comparing that outp
 
 1. **Collects facts.** Hand-built TLS handshakes enumerate exactly which protocol versions, cipher suites and key-exchange groups the server accepts, plus the certificate, DH parameter size, Encrypt-then-MAC and extended master secret. No TLS library sits in between to hide anything.
 2. **Evaluates them against standards.** Each standard is a YAML file of rules. One scan is judged against all of them at once.
-3. **Shows where standards disagree.** The comparison matrix has one row per control and one column per standard. `x25519`, for example, is fine for Mozilla but not among the BSI-recommended groups; TLS 1.2 is acceptable for BSI and Mozilla Intermediate, not for Mozilla Modern.
+3. **Shows where standards disagree.** The comparison matrix has one row per control and one column per standard.
 
-| Standard | Edition | Rules |
-|---|---|---|
-| BSI TR-02102-2 (TLS) | 2026-01 | 16 |
-| Mozilla Server Side TLS, Intermediate | 5.7 | 13 |
-| Mozilla Server Side TLS, Modern | 5.7 | 9 |
+| Standard | Region | Edition | Rules | Transcription |
+|---|---|---|---|---|
+| BSI TR-02102-2 (TLS) | Germany | 2026-01 | 16 | draft |
+| NIST SP 800-52 Rev. 2 | USA | 2019-08 | 16 | verified |
+| IETF RFC 9325 / BCP 195 | International | 2022-11 | 12 | verified |
+| NCSC-NL TLS Security Guidelines | Netherlands | 2025-05 | 14 | draft |
+| Mozilla Server Side TLS, Intermediate | International | 5.7 | 13 | draft |
+| Mozilla Server Side TLS, Modern | International | 5.7 | 9 | draft |
 
-Adding a standard is adding a YAML file: see [docs/STANDARDS.md](docs/STANDARDS.md), which also lists the next candidates (BSI TR-03116-4, NIST SP 800-52r2, PCI DSS 4.0).
+The standards really do disagree, and the tool makes that visible:
 
-> **Transcription status.** All three rule sets are marked *draft* until each rule has been checked line by line against the official document. What has and has not been verified is listed in [docs/STANDARDS.md](docs/STANDARDS.md#current-standards). The tool produces technical evidence for an audit, not a compliance certificate.
+| Configuration | BSI | NIST | IETF | NCSC-NL | Mozilla Int. |
+|---|---|---|---|---|---|
+| RSA 2048-bit certificate | fail | pass | pass | warn | pass |
+| `TLS_CHACHA20_POLY1305_SHA256` | fail | fail (not FIPS) | — | pass | pass |
+| `x25519` key exchange | warn | warn | — | pass | pass |
+| Static ECDH key exchange | warn (until end of 2026) | pass | fail | fail | fail |
+
+Adding a standard is adding a YAML file: see [docs/STANDARDS.md](docs/STANDARDS.md), which also lists the next candidates (BSI TR-03116-4, ANSSI, Canada ITSP.40.062, PCI DSS 4.0).
+
+> **Transcription status.** NIST SP 800-52r2 and RFC 9325 were transcribed from the published text. The other rule sets stay *draft* until each rule has been checked line by line against the official document; details in [docs/STANDARDS.md](docs/STANDARDS.md#current-standards). The tool produces technical evidence for an audit, not a compliance certificate.
 
 ## Use it
 
@@ -96,7 +108,7 @@ A hosted scanner parses data from servers it does not control and could be misus
 
 ## Quality
 
-- 71 tests, including end-to-end scans of real OpenSSL servers and tests for SSRF, CSRF, login rate limiting and open redirects.
+- 76 tests, including end-to-end scans of real OpenSSL servers and tests for SSRF, CSRF, login rate limiting and open redirects.
 - CI on every push: Ruff (with security rules), mypy in strict mode, pytest, a Docker Compose lab whose servers are scanned by the CLI, and a container build that is started and probed.
 - Weekly dependency audit; GitHub Actions pinned to commit hashes; read-only workflow token; Dependabot.
 - The container runs as a non-root user.
@@ -123,6 +135,7 @@ tr02102-audit scan 127.0.0.1:8444
 | M0 | Repository, CI, test lab | Done |
 | M1 | TLS prober, X.509 analysis, standards engine, CLI | Done |
 | M1.5 | Several standards side by side, web interface, container, hosting | Done |
+| M1.6 | International standards: NIST SP 800-52r2, IETF RFC 9325, NCSC-NL 2025-05 | Done |
 | M2 | SARIF output for GitHub code scanning; verified BSI transcription | Next |
 | M3 | SSH prober, BSI TR-02102-4 | Planned |
 | M4 | strongSwan configuration parser, BSI TR-02102-3 | Planned |

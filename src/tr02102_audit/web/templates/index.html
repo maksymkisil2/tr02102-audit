@@ -2,7 +2,7 @@
 {% block content %}
 <section class="hero">
   <p class="eyebrow">TLS configuration audit</p>
-  <h1>Check a server's encryption against BSI TR-02102 and other standards.</h1>
+  <h1>Check a server's encryption against BSI TR-02102 and international standards.</h1>
   <p class="lead">The scanner connects to a server, records exactly which protocol versions,
     cipher suites and key-exchange groups it accepts, and evaluates the result against
     several standards side by side. Every finding cites the section it comes from.</p>
@@ -55,7 +55,7 @@
   <div class="grid3">
     {% for s in standards %}
       <div class="card">
-        <p class="eyebrow">{{ s.publisher }}</p>
+        <p class="eyebrow">{{ s.region }}</p>
         <h3>{{ s.short_name }} <span class="muted small">{{ s.edition }}</span></h3>
         <p class="small">{{ s.description }}</p>
         <p class="small muted">{{ s.rules|length }} rules{% if s.transcription == 'draft' %} · draft transcription{% endif %}</p>

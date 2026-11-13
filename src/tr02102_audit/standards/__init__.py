@@ -82,6 +82,8 @@ class Standard:
     url: str
     description: str
     transcription: str  # "verified" or "draft"
+    region: str
+    order: int
     rules: tuple[Rule, ...]
     sha256: str
 
@@ -94,6 +96,7 @@ class Standard:
             "edition": self.edition,
             "url": self.url,
             "transcription": self.transcription,
+            "region": self.region,
             "sha256": self.sha256,
             "rules": len(self.rules),
         }
@@ -178,6 +181,8 @@ def parse(text: str) -> Standard:
         url=_require(data, "url", sid),
         description=str(_require(data, "description", sid)).strip(),
         transcription=transcription,
+        region=_require(data, "region", sid),
+        order=int(data.get("order", 100)),
         rules=tuple(rules),
         sha256=hashlib.sha256(text.encode()).hexdigest(),
     )
@@ -192,4 +197,4 @@ def load_builtin() -> dict[str, Standard]:
             if std.id in standards:
                 raise StandardError(f"duplicate standard id {std.id}")
             standards[std.id] = std
-    return standards
+    return dict(sorted(standards.items(), key=lambda kv: (kv[1].order, kv[0])))

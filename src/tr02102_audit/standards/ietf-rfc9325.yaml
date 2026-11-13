@@ -1,0 +1,167 @@
+id: ietf-rfc9325
+title: "IETF RFC 9325 (BCP 195): Recommendations for Secure Use of TLS"
+short_name: IETF RFC 9325
+publisher: Internet Engineering Task Force (IETF)
+edition: "2022-11"
+url: https://www.rfc-editor.org/rfc/rfc9325
+region: International (IETF)
+order: 3
+description: >
+  The Internet's Best Current Practice for deploying TLS, written by the body
+  that standardises TLS itself. Short and normative (MUST / SHOULD); the
+  common denominator that national guidelines build on.
+# Transcribed from the RFC text (sections 3.1, 3.5, 4.1, 4.2, 4.5).
+transcription: verified
+
+rules:
+  - id: IETF-01
+    control: protocol-versions
+    title: SSL 2.0/3.0 and TLS 1.0/1.1 are not negotiated
+    severity: high
+    reference: "RFC 9325, sec. 3.1.1 (MUST NOT)"
+    check:
+      subject: tls.protocol_versions
+      op: subset_of
+      values: [TLS1.2, TLS1.3]
+    remediation: Disable everything below TLS 1.2.
+
+  - id: IETF-02
+    control: tls13-support
+    title: TLS 1.3 is supported
+    severity: low
+    on_violation: warn
+    reference: "RFC 9325, sec. 3.1.1 (SHOULD support TLS 1.3)"
+    check:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.3
+    remediation: Enable TLS 1.3.
+
+  - id: IETF-03
+    control: broken-ciphers
+    title: No NULL, RC4, export or weak cipher suites
+    severity: high
+    reference: "RFC 9325, sec. 4.1 (MUST NOT: NULL, RC4, below 112 bits; SHOULD NOT: below 128 bits)"
+    check:
+      subject: tls.suites_broken
+      op: empty
+    remediation: Remove NULL, anonymous, export, RC4, DES and 3DES cipher suites.
+
+  - id: IETF-04
+    control: forward-secrecy
+    title: No RSA key transport or static DH
+    severity: medium
+    reference: "RFC 9325, sec. 4.1 (SHOULD NOT; MUST support and prefer forward secrecy)"
+    check:
+      subject: tls.suites_without_forward_secrecy
+      op: empty
+    remediation: Remove TLS_RSA_* and static (EC)DH cipher suites.
+
+  - id: IETF-05
+    control: tls12-cipher-suites
+    title: TLS 1.2 uses the recommended ECDHE + AES-GCM suites
+    severity: low
+    on_violation: warn
+    reference: "RFC 9325, sec. 4.2 (RECOMMENDED cipher suites)"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.2
+    check:
+      subject: tls.suites.tls12
+      op: subset_of
+      values:
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+    remediation: >
+      Other suites are not forbidden by the RFC, but only these four are
+      recommended. DHE suites in TLS 1.2 SHOULD NOT be negotiated (sec. 4.1).
+
+  - id: IETF-06
+    control: cbc-encrypt-then-mac
+    title: CBC suites only with Encrypt-then-MAC
+    severity: medium
+    reference: "RFC 9325, sec. 4.2 (CBC SHOULD NOT be used without encrypt_then_mac)"
+    check:
+      subject: tls.cbc_without_encrypt_then_mac
+      op: empty
+    remediation: Enable encrypt_then_mac (RFC 7366) or remove CBC suites.
+
+  - id: IETF-07
+    control: extended-master-secret
+    title: Extended master secret is supported
+    severity: medium
+    reference: "RFC 9325, sec. 3.5 (TLS 1.2 MUST support extended_master_secret)"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.2
+    check:
+      subject: tls.extended_master_secret
+      op: is
+      value: true
+    remediation: Enable the extended_master_secret extension (RFC 7627).
+
+  - id: IETF-08
+    control: dh-parameters
+    title: DH key length of at least 2048 bit
+    severity: high
+    reference: "RFC 9325, sec. 4.5 (REQUIRED)"
+    when:
+      subject: tls.dhe_prime_bits
+      op: present
+    check:
+      subject: tls.dhe_prime_bits
+      op: min
+      value: 2048
+    remediation: Use ffdhe2048 or larger, or remove DHE suites.
+
+  - id: IETF-09
+    control: certificate-key
+    title: RSA at least 2048 bit, curves at least 224 bit
+    severity: high
+    reference: "RFC 9325, sec. 4.5 (MUST)"
+    check:
+      subject: certificate
+      op: key_strength
+      min_bits: {RSA: 2048, EC: 224, Ed25519: 256, Ed448: 448}
+    remediation: Use RSA 2048+ or ECDSA P-256 (recommended in sec. 4.2).
+
+  - id: IETF-10
+    control: certificate-signature
+    title: No SHA-1 or MD5 signatures
+    severity: high
+    reference: "RFC 9325, sec. 4.5 (SHA-1 or MD5 MUST NOT be used)"
+    when:
+      subject: certificate.signature_hash
+      op: present
+    check:
+      subject: certificate.signature_hash
+      op: one_of
+      values: [sha224, sha256, sha384, sha512]
+    remediation: Re-issue the certificate with SHA-256 or stronger.
+
+  - id: IETF-11
+    control: certificate-validity
+    title: Certificate is within its validity period
+    severity: high
+    reference: "General requirement for server authentication"
+    check:
+      subject: certificate.expired
+      op: is
+      value: false
+    remediation: Renew the certificate.
+
+  - id: IETF-12
+    control: certificate-trust
+    title: Certificate chain and host name verify
+    severity: medium
+    reference: "RFC 9325, sec. 6.1 (host name validation)"
+    check:
+      subject: certificate.trusted
+      op: is
+      value: true
+      detail: certificate.trust_error
+    remediation: Use a certificate from a trusted CA that covers the host name, and send the full chain.

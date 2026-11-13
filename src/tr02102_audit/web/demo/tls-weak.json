@@ -2,9 +2,9 @@
   "format": 1,
   "tool_version": "0.1.0.dev0",
   "collector": "tls",
-  "collected_at": "2026-11-13T12:35:55+00:00",
-  "duration_s": 0.07,
-  "connections": 67,
+  "collected_at": "2026-11-13T13:02:14+00:00",
+  "duration_s": 0.04,
+  "connections": 69,
   "target": {
     "host": "localhost",
     "port": 8444,
@@ -57,6 +57,8 @@
           "TLS_RSA_WITH_AES_256_CCM",
           "TLS_DHE_RSA_WITH_AES_128_CCM",
           "TLS_DHE_RSA_WITH_AES_256_CCM",
+          "TLS_DHE_RSA_WITH_AES_128_CCM_8",
+          "TLS_DHE_RSA_WITH_AES_256_CCM_8",
           "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
           "TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256"
         ],
@@ -115,6 +117,8 @@
           "TLS_RSA_WITH_AES_256_CCM",
           "TLS_DHE_RSA_WITH_AES_128_CCM",
           "TLS_DHE_RSA_WITH_AES_256_CCM",
+          "TLS_DHE_RSA_WITH_AES_128_CCM_8",
+          "TLS_DHE_RSA_WITH_AES_256_CCM_8",
           "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
           "TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256"
         ]

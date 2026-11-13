@@ -9,7 +9,7 @@
 
 {% for s in standards %}
 <section class="card">
-  <p class="eyebrow">{{ s.publisher }}</p>
+  <p class="eyebrow">{{ s.region }} · {{ s.publisher }}</p>
   <h2>{{ s.title }}</h2>
   <p class="small muted">Edition {{ s.edition }} · {{ s.rules|length }} rules ·
     transcription: {{ s.transcription }} · <a href="{{ s.url }}" rel="noopener noreferrer">source</a></p>
