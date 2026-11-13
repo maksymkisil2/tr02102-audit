@@ -27,9 +27,11 @@
   </div>
   <div class="report-actions">
     {% if demo %}
-      <a class="btn btn-ghost btn-small" href="{{ url_for('demo_json', name=demo) }}">Download JSON</a>
+      <a class="btn btn-ghost btn-small" href="{{ url_for('demo_json', name=demo) }}">JSON</a>
+      <a class="btn btn-ghost btn-small" href="{{ url_for('demo_sarif', name=demo) }}">SARIF</a>
     {% elif job_id %}
-      <a class="btn btn-ghost btn-small" href="{{ url_for('job_json', job_id=job_id) }}">Download JSON</a>
+      <a class="btn btn-ghost btn-small" href="{{ url_for('job_json', job_id=job_id) }}">JSON</a>
+      <a class="btn btn-ghost btn-small" href="{{ url_for('job_sarif', job_id=job_id) }}">SARIF</a>
       <a class="btn btn-small" href="{{ url_for('scan') }}">New scan</a>
     {% endif %}
   </div>

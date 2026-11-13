@@ -1,9 +1,9 @@
 {
   "format": 1,
-  "tool_version": "0.1.0.dev0",
+  "tool_version": "0.1.0",
   "collector": "tls",
-  "collected_at": "2026-11-13T13:02:14+00:00",
-  "duration_s": 0.02,
+  "collected_at": "2026-11-13T16:21:00+00:00",
+  "duration_s": 0.03,
   "connections": 24,
   "target": {
     "host": "localhost",

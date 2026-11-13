@@ -18,6 +18,7 @@ htmlcov/
 reports/
 *.observations.json
 *.sarif
+sarif-schema-2.1.0.json
 
 # Key material must never be committed
 *.key

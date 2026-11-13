@@ -40,9 +40,19 @@ jobs:
       - name: Type-check
         run: mypy
 
-      # Includes end-to-end scans of local OpenSSL servers (tests/test_integration.py).
+      # The SARIF output is checked against the specification, not just our
+      # own expectations, so a dashboard will accept what the tool writes.
+      - name: Fetch the official SARIF 2.1.0 schema
+        run: >
+          curl -fsSL -o sarif-schema-2.1.0.json
+          https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json
+
+      # Includes end-to-end scans of local OpenSSL servers (tests/test_integration.py)
+      # and schema validation of the SARIF output.
       - name: Run tests
         run: pytest
+        env:
+          SARIF_SCHEMA: sarif-schema-2.1.0.json
 
   lab:
     name: Lab smoke test and scan
@@ -77,6 +87,17 @@ jobs:
           tr02102-audit scan 127.0.0.1:8444
           code=$?
           if [ "$code" -ne 1 ]; then echo "expected exit code 1, got $code"; exit 1; fi
+
+      - name: Write a SARIF report for the weak lab server
+        run: tr02102-audit scan 127.0.0.1:8444 --format sarif --output lab-tls-weak.sarif || true
+
+      # Published as a build artifact rather than as code-scanning alerts: the
+      # findings belong to the lab container, not to this repository.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lab-tls-weak-sarif
+          path: lab-tls-weak.sarif
+          if-no-files-found: error
 
       - name: Show container logs
         if: failure()

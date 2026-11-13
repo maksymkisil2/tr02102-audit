@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: living document · Implemented: M0, M1, M1.5, M1.6 · Last updated: 2026-11-13
+> Status: living document · Implemented: M0, M1, M1.5, M1.6, M2 · Last updated: 2026-11-13
 
 ## 1. Purpose
 
@@ -170,6 +170,7 @@ The prober builds ClientHello messages itself instead of relying on a TLS librar
 |---|---|
 | JSON | Scripts, archival, later re-evaluation |
 | SARIF 2.1.0 | GitHub code scanning and other CI dashboards |
+| SARIF 2.1.0 | GitHub code scanning and other CI dashboards; validated against the official schema in CI |
 | HTML | Human-readable audit evidence, single self-contained file without scripts |
 | CycloneDX CBOM | Cryptographic inventory (M5) |
 
@@ -233,8 +234,10 @@ tr02102-audit/
 │   ├── x509.py              # certificate facts
 │   ├── engine.py            # rules + facts -> findings (pure)
 │   ├── report.py            # report assembly, comparison, text output
+│   ├── sarif.py             # SARIF 2.1.0 output for CI dashboards
 │   ├── standards/           # one YAML file per standard + loader
 │   └── web/                 # Flask app, templates, static, demo observations
+├── examples/                # ready-to-copy CI workflow
 ├── lab/                     # docker-compose.yml and known-bad targets
 ├── tests/                   # unit, web and end-to-end tests
 ├── docs/                    # ARCHITECTURE.md, THREAT_MODEL.md, STANDARDS.md, adr/
@@ -250,7 +253,8 @@ tr02102-audit/
 | M1 | TLS prober, X.509 analyser, standards engine, JSON and text reports | Done |
 | M1.5 | Several standards side by side (BSI TR-02102-2, Mozilla Intermediate and Modern), web interface, container image, hosting | Done |
 | M1.6 | International standards (NIST SP 800-52r2, IETF RFC 9325, NCSC-NL 2025-05); phase-out levels in rules | Done |
-| M2 | SARIF output and GitHub code-scanning example; verified transcription of the BSI rules | Next |
+| M2 | SARIF 2.1.0 output, CI integration example, first release | Done |
+| M2.1 | Line-by-line verification of the draft transcriptions | Next |
 | M3 | SSH prober, TR-02102-4 rules | Planned |
 | M4 | strongSwan configuration parser, TR-02102-3 rules | Planned |
 | M5 | CycloneDX CBOM, post-quantum readiness section | Planned |

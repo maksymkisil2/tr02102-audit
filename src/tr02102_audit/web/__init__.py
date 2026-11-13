@@ -35,7 +35,7 @@ from flask import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from tr02102_audit import __version__, report
+from tr02102_audit import __version__, report, sarif
 from tr02102_audit.engine import STATUS_RANK
 from tr02102_audit.netguard import TargetError, parse_target, resolve
 from tr02102_audit.standards import CONTROLS, load_builtin
@@ -278,6 +278,14 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             abort(404)
         return _json_download(j.report, f"tr02102-audit-{job_id}.json")
 
+    @app.get("/reports/<job_id>.sarif")
+    @login_required
+    def job_sarif(job_id: str) -> Response:
+        j = jobs.get(job_id)
+        if j is None or j.report is None:
+            abort(404)
+        return _json_download(sarif.build(j.report), f"tr02102-audit-{job_id}.sarif")
+
     @app.get("/demo/<name>")
     def demo(name: str) -> str:
         if name not in DEMOS:
@@ -291,6 +299,13 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             abort(404)
         rep = report.build(_load_demo(name), list(standards.values()))
         return _json_download(rep, f"demo-{name}.json")
+
+    @app.get("/demo/<name>.sarif")
+    def demo_sarif(name: str) -> Response:
+        if name not in DEMOS:
+            abort(404)
+        rep = report.build(_load_demo(name), list(standards.values()))
+        return _json_download(sarif.build(rep), f"demo-{name}.sarif")
 
     @app.errorhandler(400)
     @app.errorhandler(404)

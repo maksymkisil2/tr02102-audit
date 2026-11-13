@@ -72,6 +72,16 @@ tr02102-audit serve                              # web interface on 127.0.0.1:80
 
 Exit codes: `0` no failure at or above `--fail-on` (default `medium`), `1` failures found, `2` scan error or incomplete scan. A pipeline can therefore gate a deployment on the result.
 
+### In a CI pipeline
+
+`--format sarif` writes SARIF 2.1.0, the format CI dashboards read, so a weakened TLS configuration becomes an alert that opens and closes itself:
+
+```bash
+tr02102-audit scan "$HOST" --format sarif --output tls.sarif --fail-on high
+```
+
+Each finding carries its severity, the section of the standard it comes from, the fix, and a stable fingerprint, so the same finding stays the same alert across runs. A ready-to-copy weekly workflow that uploads the result to GitHub code scanning is in [`examples/`](examples/). The output is validated against the official SARIF schema in CI.
+
 ## How it works
 
 ```mermaid
@@ -108,8 +118,8 @@ A hosted scanner parses data from servers it does not control and could be misus
 
 ## Quality
 
-- 76 tests, including end-to-end scans of real OpenSSL servers and tests for SSRF, CSRF, login rate limiting and open redirects.
-- CI on every push: Ruff (with security rules), mypy in strict mode, pytest, a Docker Compose lab whose servers are scanned by the CLI, and a container build that is started and probed.
+- 85 tests, including end-to-end scans of real OpenSSL servers and tests for SSRF, CSRF, login rate limiting and open redirects.
+- CI on every push: Ruff (with security rules), mypy in strict mode, pytest, SARIF output validated against the official schema, a Docker Compose lab whose servers are scanned by the CLI, and a container build that is started and probed.
 - Weekly dependency audit; GitHub Actions pinned to commit hashes; read-only workflow token; Dependabot.
 - The container runs as a non-root user.
 
@@ -136,7 +146,8 @@ tr02102-audit scan 127.0.0.1:8444
 | M1 | TLS prober, X.509 analysis, standards engine, CLI | Done |
 | M1.5 | Several standards side by side, web interface, container, hosting | Done |
 | M1.6 | International standards: NIST SP 800-52r2, IETF RFC 9325, NCSC-NL 2025-05 | Done |
-| M2 | SARIF output for GitHub code scanning; verified BSI transcription | Next |
+| M2 | SARIF output, CI integration, first release | Done |
+| M2.1 | Line-by-line verification of the BSI, NCSC-NL and Mozilla transcriptions | Next |
 | M3 | SSH prober, BSI TR-02102-4 | Planned |
 | M4 | strongSwan configuration parser, BSI TR-02102-3 | Planned |
 | M5 | CycloneDX cryptographic bill of materials, post-quantum readiness | Planned |
@@ -144,6 +155,10 @@ tr02102-audit scan 127.0.0.1:8444
 ## Related work
 
 TLSAssistant, Greenbone/OpenVAS and BSI TaSK each cover part of this ground; how this project differs is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#12-related-work).
+
+## Contributing
+
+Corrections to the transcribed standards are the most useful contribution; see [CONTRIBUTING.md](CONTRIBUTING.md). Released versions are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Responsible use
 

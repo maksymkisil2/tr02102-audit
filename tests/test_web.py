@@ -120,6 +120,14 @@ def test_scan_runs_in_background_and_report_escapes_target_data(client: FlaskCli
     assert client.get(url + ".json").status_code == 200
 
 
+def test_demo_reports_are_downloadable_as_json_and_sarif(client: FlaskClient) -> None:
+    assert client.get("/demo/tls-weak.json").get_json()["observation"]["facts"]["tls"]
+    log = client.get("/demo/tls-weak.sarif").get_json()
+    assert log["version"] == "2.1.0"
+    assert log["runs"][0]["results"], "the weak demo server must produce findings"
+    assert client.get("/demo/nope.sarif").status_code == 404
+
+
 def test_demo_only_mode_without_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("APP_PASSWORD", raising=False)
     client = create_app({"TESTING": True}).test_client()

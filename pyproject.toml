@@ -36,6 +36,7 @@ dev = [
     "pytest==9.1.1",
     "ruff==0.16.9",
     "types-PyYAML",
+    "jsonschema",      # validates the SARIF output against the official schema
 ]
 
 [project.scripts]

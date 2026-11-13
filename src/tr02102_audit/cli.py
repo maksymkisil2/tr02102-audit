@@ -13,7 +13,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from tr02102_audit import __version__, report
+from tr02102_audit import __version__, report, sarif
 from tr02102_audit.exit_codes import ExitCode
 from tr02102_audit.netguard import TargetError, parse_target, resolve
 from tr02102_audit.scan import scan_tls
@@ -40,7 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
             metavar="ID",
             help="standard to evaluate against (repeatable; default: all)",
         )
-        p.add_argument("-f", "--format", choices=("text", "json"), default="text")
+        p.add_argument(
+            "-f",
+            "--format",
+            choices=("text", "json", "sarif"),
+            default="text",
+            help="sarif suits CI dashboards such as GitHub code scanning",
+        )
         p.add_argument("-o", "--output", type=Path, help="write the report to this file")
         p.add_argument(
             "--fail-on",
@@ -81,7 +87,12 @@ def _select(ids: Sequence[str] | None) -> list[Standard]:
 
 
 def _emit(rep: dict[str, object], args: argparse.Namespace) -> int:
-    text = json.dumps(rep, indent=2) + "\n" if args.format == "json" else report.render_text(rep)
+    if args.format == "json":
+        text = json.dumps(rep, indent=2) + "\n"
+    elif args.format == "sarif":
+        text = json.dumps(sarif.build(rep), indent=2) + "\n"
+    else:
+        text = report.render_text(rep)
     if args.output:
         args.output.write_text(text, encoding="utf-8")
         args.output.chmod(0o600)  # reports describe weaknesses (threat T-07)
