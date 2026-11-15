@@ -1,0 +1,40 @@
+name: Real-world validation
+
+# The scanner builds its own TLS handshakes, so its results are cross-checked
+# against an independent implementation (OpenSSL) on real servers. This runs
+# by hand, or when the target list or the check itself changes; it is not part
+# of CI because it talks to servers that are not ours.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "validation/**"
+      - ".github/workflows/validation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation
+  cancel-in-progress: true
+
+jobs:
+  differential:
+    name: Scanner vs OpenSSL on real servers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Alpine ships OpenSSL 3.5, which can also negotiate the hybrid
+      # post-quantum groups and, at security level 0, TLS 1.0 and 1.1.
+      - name: Compare the scanner with OpenSSL
+        run: >
+          docker run --rm -v "$PWD":/src -w /src python:3.13-alpine sh -c
+          'apk add --no-cache openssl >/dev/null &&
+          pip install -q --root-user-action=ignore -r requirements.txt . &&
+          python validation/differential.py validation/targets.txt'

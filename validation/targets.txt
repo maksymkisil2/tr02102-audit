@@ -1,0 +1,24 @@
+# Targets for the differential validation (validation/differential.py).
+#
+# The list is deliberately short. Every target is either built for TLS testing,
+# or a very large public site whose TLS setup is measured by public tools every
+# day. One run opens roughly two hundred short connections per target.
+# Changing this file re-runs the validation workflow.
+
+# Purpose-built TLS test endpoints (badssl.com)
+tls-v1-0.badssl.com:1010
+rc4.badssl.com
+expired.badssl.com
+mozilla-intermediate.badssl.com
+
+# The platform the workflow runs on
+github.com
+
+# Large public sites running different TLS stacks
+www.google.com
+www.cloudflare.com
+www.microsoft.com
+
+# Sites that exist to test or document TLS
+internet.nl
+www.ssllabs.com
