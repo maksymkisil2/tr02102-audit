@@ -38,7 +38,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from tr02102_audit import __version__, report, sarif
 from tr02102_audit.engine import STATUS_RANK
 from tr02102_audit.netguard import TargetError, parse_target, resolve
-from tr02102_audit.standards import CONTROLS, load_builtin
+from tr02102_audit.standards import CONTROLS, defaults, load_builtin
 from tr02102_audit.tls.registry import suite_info
 from tr02102_audit.web.jobs import JobStore
 
@@ -47,7 +47,8 @@ R = TypeVar("R")
 
 DEMOS = {
     "tls-weak": "Deliberately weak server from the test lab",
-    "tls-good": "Modern server from the test lab",
+    "tls-typical": "Typical modern website from the test lab",
+    "tls-good": "Server hardened to the BSI lists, from the test lab",
 }
 
 CSP = (
@@ -230,7 +231,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     @login_required
     def scan() -> str | Response:
         target_text = ""
-        chosen = list(standards)
+        chosen = [s.id for s in defaults(standards)]
         if request.method == "POST":
             check_csrf()
             target_text = request.form.get("target", "")[:300]
@@ -290,21 +291,21 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     def demo(name: str) -> str:
         if name not in DEMOS:
             abort(404)
-        rep = report.build(_load_demo(name), list(standards.values()))
+        rep = report.build(_load_demo(name), defaults(standards))
         return render_report(rep, demo=name)
 
     @app.get("/demo/<name>.json")
     def demo_json(name: str) -> Response:
         if name not in DEMOS:
             abort(404)
-        rep = report.build(_load_demo(name), list(standards.values()))
+        rep = report.build(_load_demo(name), defaults(standards))
         return _json_download(rep, f"demo-{name}.json")
 
     @app.get("/demo/<name>.sarif")
     def demo_sarif(name: str) -> Response:
         if name not in DEMOS:
             abort(404)
-        rep = report.build(_load_demo(name), list(standards.values()))
+        rep = report.build(_load_demo(name), defaults(standards))
         return _json_download(sarif.build(rep), f"demo-{name}.sarif")
 
     @app.errorhandler(400)

@@ -14,6 +14,7 @@ description: >
 # docs/STANDARDS.md for the review procedure.
 transcription: draft
 region: Germany
+category: government
 order: 1
 
 rules:
@@ -101,11 +102,11 @@ rules:
 
   - id: BSI-TLS-05
     control: broken-ciphers
-    title: No broken or anonymous cipher suites
+    title: No broken, anonymous or 3DES cipher suites
     severity: high
     reference: "TR-02102-2, sec. 3.3.1 (not in any recommended table)"
     check:
-      subject: tls.suites_broken
+      subject: tls.suites_weak
       op: empty
     remediation: Remove NULL, anonymous, export, RC4, DES and 3DES cipher suites.
 
@@ -280,3 +281,31 @@ rules:
       subject: tls.hybrid_pq_groups
       op: not_empty
     remediation: Plan the migration to a hybrid group such as SecP256r1MLKEM768 before 2032.
+
+  - id: BSI-TLS-17
+    control: secure-renegotiation
+    title: Secure renegotiation is signalled
+    severity: medium
+    reference: "TR-02102-2, further recommendations: session renegotiation only according to RFC 5746"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.2
+    check:
+      subject: tls.secure_renegotiation
+      op: is
+      value: true
+    remediation: >
+      Update the TLS stack so that it answers the renegotiation_info extension
+      (RFC 5746). Without it a client cannot tell whether renegotiation is safe.
+
+  - id: BSI-TLS-18
+    control: tls-compression
+    title: TLS compression is disabled
+    severity: medium
+    reference: "TR-02102-2, further recommendations: TLS compression (CRIME)"
+    check:
+      subject: tls.compression
+      op: is
+      value: false
+    remediation: Disable TLS-level compression (CRIME attack).

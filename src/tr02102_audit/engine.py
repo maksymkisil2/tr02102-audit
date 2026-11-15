@@ -37,6 +37,9 @@ class Finding:
     evidence: list[str] = field(default_factory=list)
     reference: str = ""
     remediation: str = ""
+    # "required": the standard says MUST / shall, a violation is a failure.
+    # "recommended": the standard says SHOULD, a violation is a warning.
+    level: str = "required"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -190,9 +193,11 @@ def _key_strength(spec: Mapping[str, Any], cert: Any) -> Result:
         return Result("fail", f"curve {cert.get('curve')} is not covered", [label])
     recommended: Mapping[str, int] = spec.get("recommended_bits", {})
     if key_type in recommended and bits < recommended[key_type]:
-        return Result(
-            "warn", f"{label}; due to be phased out below {recommended[key_type]} bit", [label]
-        )
+        wanted = recommended[key_type]
+        return Result("warn", f"{label}; {wanted} bit or more is recommended", [label])
+    preferred = spec.get("recommended_curves")
+    if key_type == "EC" and preferred and cert.get("curve") not in preferred:
+        return Result("warn", f"curve {cert.get('curve')} is not a recommended one", [label])
     return Result("pass", label)
 
 
@@ -223,6 +228,7 @@ def _finding(rule: Rule, result: Result) -> Finding:
         evidence=result.evidence,
         reference=rule.reference,
         remediation=rule.remediation if result.status in ("fail", "warn") else "",
+        level="recommended" if rule.on_violation == "warn" else "required",
     )
 
 

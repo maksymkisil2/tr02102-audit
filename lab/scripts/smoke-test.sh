@@ -1,13 +1,14 @@
 #!/bin/sh
 # Verifies that the lab targets behave as documented in lab/README.md.
 #
-# The integration tests of the scanner rely on these two servers having a
+# The integration tests of the scanner rely on these servers having a
 # known configuration. If an image update silently changes what a target
 # accepts, this script fails before any scanner test can give a wrong answer.
 set -eu
 
 GOOD="${GOOD:-tls-good:443}"
 WEAK="${WEAK:-tls-weak:443}"
+TYPICAL="${TYPICAL:-tls-typical:443}"
 
 # Client-side switch that lets OpenSSL offer legacy protocol versions and
 # cipher suites at all. It does not make the server accept them.
@@ -86,6 +87,17 @@ expect_accept "accepts TLS 1.2" "$WEAK" -tls1_2
 expect_accept "accepts RSA key exchange (no forward secrecy)" "$WEAK" -tls1_2 -cipher AES128-SHA
 expect_reject "does not offer TLS 1.3" "$WEAK" -tls1_3
 expect_key "certificate uses a 2048-bit RSA key" "$WEAK" 2048
+
+echo "== tls-typical ($TYPICAL)"
+expect_accept "accepts TLS 1.3" "$TYPICAL" -tls1_3
+expect_accept "accepts TLS 1.2 with forward secrecy" "$TYPICAL" -tls1_2
+expect_reject "refuses TLS 1.1" "$TYPICAL" -tls1_1 -cipher "$LEGACY"
+expect_reject "refuses RSA key exchange (no forward secrecy)" "$TYPICAL" -tls1_2 -cipher AES128-GCM-SHA256
+expect_reject "refuses CBC cipher suites" "$TYPICAL" -tls1_2 -cipher ECDHE-RSA-AES128-SHA
+expect_accept "accepts ChaCha20-Poly1305 in TLS 1.3" "$TYPICAL" -tls1_3 -ciphersuites TLS_CHACHA20_POLY1305_SHA256
+expect_accept "accepts ChaCha20-Poly1305 in TLS 1.2" "$TYPICAL" -tls1_2 -cipher ECDHE-RSA-CHACHA20-POLY1305
+expect_accept "accepts Curve25519 key exchange" "$TYPICAL" -tls1_3 -groups X25519
+expect_key "certificate uses a 2048-bit RSA key" "$TYPICAL" 2048
 
 if [ "$failures" -gt 0 ]; then
     echo "$failures check(s) failed: the lab does not match its documentation"

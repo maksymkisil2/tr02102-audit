@@ -6,11 +6,17 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
-from tr02102_audit import __version__
+from tr02102_audit import __version__, rating
 from tr02102_audit.engine import Evaluation, evaluate_all
 from tr02102_audit.standards import CONTROLS, Standard
+from tr02102_audit.tls.registry import GROUPS, suite_info
 
-REPORT_FORMAT = 1
+REPORT_FORMAT = 2
+
+# Controls that are judged against an approved list. A failure here can mean
+# "weak", or merely "secure, but not on this standard's list".
+_LIST_CONTROLS = frozenset({"tls12-cipher-suites", "tls13-cipher-suites", "key-exchange-groups"})
+_SOUND_GROUPS = frozenset(GROUPS.values()) - {"secp224r1"}
 
 
 def observation_digest(observation: dict[str, Any]) -> str:
@@ -29,17 +35,55 @@ def comparison(evaluations: Sequence[Evaluation]) -> list[dict[str, Any]]:
     return rows
 
 
+def _only_off_list(finding: dict[str, Any]) -> bool:
+    """True when a rule objects only to values that are sound, but not on its list.
+
+    ChaCha20 or x25519 fail the approved lists of BSI and NIST although no
+    standard calls them weak. Telling the two cases apart is what makes a
+    "does not conform" verdict readable.
+    """
+    if finding["control"] not in _LIST_CONTROLS or not finding["evidence"]:
+        return False
+    for item in finding["evidence"]:
+        name = str(item).split(" ", 1)[0]
+        if name in _SOUND_GROUPS:
+            continue
+        if not name.startswith("TLS_"):
+            return False
+        info = suite_info(name)
+        if info.weak or not info.forward_secrecy or not info.aead:
+            return False
+    return True
+
+
+def _evaluation(evaluation: Evaluation, complete: bool) -> dict[str, Any]:
+    data = evaluation.to_dict()
+    blocking = []
+    for finding in data["findings"]:
+        finding["off_list_only"] = finding["status"] in ("fail", "warn") and _only_off_list(finding)
+        if finding["status"] == "fail" and finding["severity"] in ("high", "medium"):
+            blocking.append(finding)
+    # A scan that left something unmeasured can prove a failure, never a pass.
+    if not complete and data["verdict"] in ("pass", "pass_with_warnings"):
+        data["verdict"] = "incomplete"
+    # "Fails only because of the approved list": no weakness was found.
+    data["off_list_only"] = bool(blocking) and all(f["off_list_only"] for f in blocking)
+    return data
+
+
 def build(
     observation: dict[str, Any], standards: Sequence[Standard], today: date | None = None
 ) -> dict[str, Any]:
     evaluations = evaluate_all(standards, observation["facts"], today)
+    complete = bool(observation.get("complete", True))
     return {
         "format": REPORT_FORMAT,
         "tool_version": __version__,
         "evaluated_on": (today or date.today()).isoformat(),
         "observation_sha256": observation_digest(observation),
         "observation": observation,
-        "evaluations": [e.to_dict() for e in evaluations],
+        "rating": rating.rate(observation, today),
+        "evaluations": [_evaluation(e, complete) for e in evaluations],
         "comparison": {
             "standards": [e.standard.short_name for e in evaluations],
             "rows": comparison(evaluations),
@@ -99,6 +143,16 @@ def render_text(report: dict[str, Any]) -> str:
         )
     for note in obs["notes"]:
         lines.append(f"Note        {_clean(note)}")
+    for reason in obs.get("incomplete", []):
+        lines.append(f"Incomplete  {_clean(reason)}")
+
+    rate = report["rating"]
+    grade = rate["grade"] or f"not rated (at best {rate['at_best']})"
+    lines += ["", f"Rating      {grade}   (the tool's own summary, not part of a standard)"]
+    for reason in rate["reasons"]:
+        lines.append(f"            {reason['grade']}: {reason['title']}")
+    for item in rate["unknown"]:
+        lines.append(f"            ?: could not be checked: {item['title']}")
 
     comp = report["comparison"]
     width = max(len(r["label"]) for r in comp["rows"]) if comp["rows"] else 10
@@ -119,11 +173,18 @@ def render_text(report: dict[str, Any]) -> str:
             f"   {c['pass']} pass · {c['fail']} fail · {c['warn']} warn · "
             f"{c['inconclusive']} inconclusive · {c['not_applicable']} n/a",
         ]
+        if ev.get("off_list_only"):
+            lines.append(
+                "   Fails only because of the standard's approved list; "
+                "no weak algorithm was found."
+            )
         for f in ev["findings"]:
             if f["status"] in ("pass", "not_applicable"):
                 continue
             lines.append(f"   {_SYMBOL[f['status']]} [{f['severity']}] {f['rule_id']} {f['title']}")
             lines.append(f"        {_clean(f['message'])}")
+            if f.get("off_list_only"):
+                lines.append("        (sound elsewhere, but not on this standard's approved list)")
             for item in f["evidence"][:8]:
                 lines.append(f"        - {_clean(item)}")
             if len(f["evidence"]) > 8:

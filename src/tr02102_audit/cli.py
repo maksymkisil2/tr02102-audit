@@ -17,7 +17,7 @@ from tr02102_audit import __version__, report, sarif
 from tr02102_audit.exit_codes import ExitCode
 from tr02102_audit.netguard import TargetError, parse_target, resolve
 from tr02102_audit.scan import scan_tls
-from tr02102_audit.standards import Standard, load_builtin
+from tr02102_audit.standards import Standard, defaults, load_builtin
 
 PROG = "tr02102-audit"
 SEVERITIES = ("info", "low", "medium", "high")
@@ -38,7 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
             "--standard",
             action="append",
             metavar="ID",
-            help="standard to evaluate against (repeatable; default: all)",
+            help="standard to evaluate against (repeatable; 'all' includes the optional "
+            "community baselines; default: the formal standards)",
         )
         p.add_argument(
             "-f",
@@ -62,6 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="refuse private, loopback and reserved addresses (as the web service does)",
     )
+    scan.add_argument(
+        "--ca-file",
+        type=Path,
+        metavar="PEM",
+        help="additional trusted CA certificates, for servers with an internal PKI",
+    )
     add_output_options(scan)
 
     ev = sub.add_parser("evaluate", help="re-evaluate a saved JSON report or observation")
@@ -79,6 +86,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _select(ids: Sequence[str] | None) -> list[Standard]:
     available = load_builtin()
     if not ids:
+        return defaults(available)
+    if "all" in ids:
         return list(available.values())
     unknown = [i for i in ids if i not in available]
     if unknown:
@@ -114,7 +123,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "standards":
         for std in load_builtin().values():
             meta = f"{std.edition}, {len(std.rules)} rules, {std.transcription}"
-            print(f"{std.id:24} {std.title} ({meta})")
+            optional = "" if std.default else " [optional]"
+            print(f"{std.id:24} {std.title} ({meta}){optional}")
         return ExitCode.OK
 
     if args.command == "scan":
@@ -125,7 +135,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         except TargetError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return ExitCode.ERROR
-        observation = scan_tls(target)
+        if args.ca_file is not None and not args.ca_file.is_file():
+            print(f"error: CA file {args.ca_file} not found", file=sys.stderr)
+            return ExitCode.ERROR
+        observation = scan_tls(target, ca_file=str(args.ca_file) if args.ca_file else None)
         return _emit(report.build(observation, standards), args)
 
     if args.command == "evaluate":

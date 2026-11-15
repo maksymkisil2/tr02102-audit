@@ -5,15 +5,18 @@ publisher: National Institute of Standards and Technology (NIST)
 edition: "2019-08"
 url: https://csrc.nist.gov/pubs/sp/800/52/r2/final
 region: USA
+category: government
 order: 2
 description: >
   The US federal baseline for TLS, also used in FedRAMP and many international
   tenders. Restricted to FIPS-approved algorithms: no ChaCha20, no Curve25519.
-  This profile applies the rules for government-only servers. NIST started a
-  review of this publication in May 2026.
+  This profile applies the rules for government-only servers ("shall" is a
+  failure, "should" a warning). NIST started a review of this publication in
+  May 2026.
 # Cipher-suite lists, versions, certificate and extension requirements were
-# transcribed from the publication. The group list relies on SP 800-56A Rev. 3,
-# Appendix D, which is referenced by section 3.4.2.2.
+# transcribed from the publication and its requirement levels re-checked
+# against the PDF (sections 3.1 to 3.7, Appendix D). The group list relies on
+# SP 800-56A Rev. 3, Appendix D, which is referenced by section 3.4.2.2.
 transcription: verified
 
 rules:
@@ -112,9 +115,22 @@ rules:
         - TLS_ECDH_RSA_WITH_AES_256_CBC_SHA384
         - TLS_ECDH_RSA_WITH_AES_128_CBC_SHA
         - TLS_ECDH_RSA_WITH_AES_256_CBC_SHA
+        # Appendix D, RSA key transport: not recommended, but permitted while
+        # an agency moves away from it. Reported as a warning.
+        - {value: TLS_RSA_WITH_AES_128_CCM, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_256_CCM, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_128_CCM_8, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_256_CCM_8, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_128_CBC_SHA, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_256_CBC_SHA, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_128_CBC_SHA256, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_256_CBC_SHA256, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_128_GCM_SHA256, phase_out: true}
+        - {value: TLS_RSA_WITH_AES_256_GCM_SHA384, phase_out: true}
     remediation: >
-      Use only AES with GCM, CCM or CBC and (EC)DHE or static (EC)DH key
-      agreement. RSA key transport, ChaCha20 and Camellia are not on the list.
+      Use only AES with GCM, CCM or CBC and (EC)DHE key agreement. ChaCha20,
+      Camellia and 3DES are not on the list ("shall not be used"). RSA key
+      transport (Appendix D) is tolerated for a transition period only.
 
   - id: NIST-05
     control: tls13-cipher-suites
@@ -133,11 +149,11 @@ rules:
 
   - id: NIST-06
     control: broken-ciphers
-    title: No broken or anonymous cipher suites
+    title: No broken, anonymous or 3DES cipher suites
     severity: high
-    reference: "SP 800-52r2, sec. 3.3.1 (at least 112 bits of security)"
+    reference: "SP 800-52r2, sec. 3.3.1 and 3.3.1.1 (3DES is no longer allowed)"
     check:
-      subject: tls.suites_broken
+      subject: tls.suites_weak
       op: empty
     remediation: Remove NULL, anonymous, export, RC4, DES and 3DES cipher suites.
 
@@ -191,14 +207,14 @@ rules:
 
   - id: NIST-10
     control: certificate-key
-    title: RSA 2048+ or ECDSA on P-256/P-384
+    title: RSA 2048+ or ECDSA, preferably on P-256 or P-384
     severity: high
-    reference: "SP 800-52r2, sec. 3.2 and Table 3-1"
+    reference: "SP 800-52r2, sec. 3.2 and Table 3-1 (P-256 or P-384 should be used)"
     check:
       subject: certificate
       op: key_strength
       min_bits: {RSA: 2048, EC: 256}
-      curves: [secp256r1, secp384r1]
+      recommended_curves: [secp256r1, secp384r1]
     remediation: Use an RSA key of 2048 bit or more, or ECDSA on P-256 or P-384.
 
   - id: NIST-11
@@ -273,3 +289,31 @@ rules:
       value: true
       detail: certificate.trust_error
     remediation: Use a certificate from a trusted CA that covers the host name, and send the full chain.
+
+  - id: NIST-17
+    control: secure-renegotiation
+    title: Secure renegotiation is signalled
+    severity: medium
+    reference: "SP 800-52r2, sec. 3.4.1.1 (shall support the Renegotiation Indication extension)"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.2
+    check:
+      subject: tls.secure_renegotiation
+      op: is
+      value: true
+    remediation: >
+      Update the TLS stack so that it answers the renegotiation_info extension
+      (RFC 5746). Without it a client cannot tell whether renegotiation is safe.
+
+  - id: NIST-18
+    control: tls-compression
+    title: TLS compression is disabled
+    severity: medium
+    reference: "SP 800-52r2, sec. 3.7 (all compression methods other than null shall be disabled)"
+    check:
+      subject: tls.compression
+      op: is
+      value: false
+    remediation: Disable TLS-level compression (CRIME attack).

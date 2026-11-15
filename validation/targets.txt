@@ -5,11 +5,20 @@
 # day. One run opens roughly two hundred short connections per target.
 # Changing this file re-runs the validation workflow.
 
-# Purpose-built TLS test endpoints (badssl.com)
+# Purpose-built TLS test endpoints (badssl.com). Each one exhibits a known
+# property, which the script checks in addition to the OpenSSL comparison.
 tls-v1-0.badssl.com:1010
+tls-v1-2.badssl.com:1012
 rc4.badssl.com
+3des.badssl.com
+null.badssl.com
+static-rsa.badssl.com
+dh1024.badssl.com
 expired.badssl.com
+self-signed.badssl.com
+wrong.host.badssl.com
 mozilla-intermediate.badssl.com
+mozilla-modern.badssl.com
 
 # The platform the workflow runs on
 github.com

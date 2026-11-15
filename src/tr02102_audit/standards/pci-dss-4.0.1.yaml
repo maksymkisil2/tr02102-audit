@@ -1,0 +1,141 @@
+id: pci-dss-4.0.1
+title: "PCI DSS v4.0.1, Requirement 4.2.1: strong cryptography for data in transit"
+short_name: PCI DSS 4.0.1
+publisher: PCI Security Standards Council
+edition: "2024-06"
+url: https://www.pcisecuritystandards.org/document_library/
+region: International (payment cards)
+category: international
+order: 5
+description: >
+  The security standard that every organisation handling payment cards has to
+  meet, worldwide. Requirement 4.2.1 demands strong cryptography when
+  cardholder data crosses open networks. PCI DSS itself names no cipher
+  suites; this profile applies what the PCI Security Standards Council
+  defines as strong cryptography (glossary, FAQ 1491, ASV Program Guide).
+  It is a technical pre-check. Only a QSA or an ASV scan can attest
+  compliance, and certificate revocation is not checked here.
+# Requirement 4.2.1, the glossary entry "Strong Cryptography" and FAQ 1491
+# (updated July 2026) were read for every rule below.
+transcription: verified
+
+rules:
+  - id: PCI-01
+    control: protocol-versions
+    title: SSL and early TLS (1.0, 1.1) are not accepted
+    severity: high
+    reference: "PCI DSS 4.2.1; PCI SSC FAQ 1491 (SSL and TLS 1.0/1.1 are not strong cryptography)"
+    check:
+      subject: tls.protocol_versions
+      op: subset_of
+      values: [TLS1.2, TLS1.3]
+    remediation: Disable SSL 3.0, TLS 1.0 and TLS 1.1.
+
+  - id: PCI-02
+    control: broken-ciphers
+    title: No NULL, anonymous, export, RC4 or DES cipher suites
+    severity: high
+    reference: "PCI DSS glossary, Strong Cryptography (at least 112 bits of effective key strength); ASV Program Guide (anonymous key exchange fails automatically)"
+    check:
+      subject: tls.suites_broken
+      op: empty
+    remediation: Remove these cipher suites.
+
+  - id: PCI-03
+    control: broken-ciphers
+    title: No 64-bit block ciphers (3DES)
+    severity: high
+    reference: "PCI SSC FAQ 1491 (symmetric ciphers with a block size below 128 bits must not be used)"
+    check:
+      subject: tls.suites_3des
+      op: empty
+    remediation: Remove 3DES cipher suites.
+
+  - id: PCI-04
+    control: forward-secrecy
+    title: Cipher suites provide forward secrecy
+    severity: low
+    on_violation: warn
+    reference: "PCI SSC FAQ 1491 (best practice)"
+    check:
+      subject: tls.suites_without_forward_secrecy
+      op: empty
+    remediation: Remove cipher suites with static RSA or static (EC)DH key exchange.
+
+  - id: PCI-05
+    control: dh-parameters
+    title: Diffie-Hellman parameters of at least 2048 bit
+    severity: high
+    reference: "PCI DSS glossary, Strong Cryptography (DH: 2048 bits and higher)"
+    when:
+      subject: tls.dhe_prime_bits
+      op: present
+    check:
+      subject: tls.dhe_prime_bits
+      op: min
+      value: 2048
+    remediation: Use ffdhe2048 or larger, or remove DHE suites.
+
+  - id: PCI-06
+    control: certificate-key
+    title: Certificate key of at least 112 bits of strength
+    severity: high
+    reference: "PCI DSS glossary, Strong Cryptography (RSA 2048+, ECC 224+; 128 bits recommended for new implementations)"
+    check:
+      subject: certificate
+      op: key_strength
+      min_bits: {RSA: 2048, EC: 224, Ed25519: 256, Ed448: 448}
+      recommended_bits: {RSA: 3072}
+    remediation: Use RSA 2048 bit or more (3072 recommended for new systems), or an elliptic-curve key.
+
+  - id: PCI-07
+    control: certificate-signature
+    title: Certificate is not signed with SHA-1 or MD5
+    severity: high
+    reference: "PCI DSS glossary, Strong Cryptography (112 bits; SHA-1 offers less against collisions)"
+    when:
+      subject: certificate.signature_hash
+      op: present
+    check:
+      subject: certificate.signature_hash
+      op: one_of
+      values: [sha224, sha256, sha384, sha512]
+    remediation: Re-issue the certificate with SHA-256 or stronger.
+
+  - id: PCI-08
+    control: certificate-validity
+    title: Certificate is valid and not expired
+    severity: high
+    reference: "PCI DSS 4.2.1 (certificates are valid and are not expired or revoked)"
+    check:
+      subject: certificate.expired
+      op: is
+      value: false
+    remediation: Renew the certificate. Revocation is not checked by this scanner.
+
+  - id: PCI-09
+    control: certificate-trust
+    title: Only trusted keys and certificates are accepted
+    severity: high
+    reference: "PCI DSS 4.2.1 (only trusted keys and certificates are accepted)"
+    check:
+      subject: certificate.trusted
+      op: is
+      value: true
+      detail: certificate.trust_error
+    remediation: Use a certificate from a trusted CA that covers the host name, and send the full chain.
+
+  - id: PCI-10
+    control: post-quantum
+    title: Hybrid post-quantum key exchange is offered
+    severity: info
+    on_violation: warn
+    reference: "PCI SSC FAQ 1491 (best practice: prepare for post-quantum cryptography)"
+    when:
+      subject: tls.protocol_versions
+      op: contains
+      value: TLS1.3
+    check:
+      subject: tls.hybrid_pq_groups
+      op: not_empty
+    remediation: Plan a hybrid key-exchange group such as X25519MLKEM768.

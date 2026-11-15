@@ -5,6 +5,7 @@ publisher: Nationaal Cyber Security Centrum (NCSC-NL)
 edition: "2025-05"
 url: https://english.ncsc.nl/publications/publications/2025/06/26/security-guidelines-for-transport-layer-security-2025-05
 region: Netherlands
+category: government
 order: 4
 description: >
   The Dutch national guideline, used in procurement across the Dutch public
@@ -110,7 +111,7 @@ rules:
     severity: high
     reference: "NCSC-NL 2025-05, sec. 3.3.2, Table 2 and sec. 3.3.4, Table 8 (Insufficient)"
     check:
-      subject: tls.suites_broken
+      subject: tls.suites_weak
       op: empty
     remediation: Remove these cipher suites.
 
@@ -245,3 +246,14 @@ rules:
       value: true
       detail: certificate.trust_error
     remediation: Use a certificate from a trusted CA that covers the host name, and send the full chain.
+
+  - id: NL-15
+    control: tls-compression
+    title: TLS compression is disabled
+    severity: medium
+    reference: "NCSC-NL 2025-05, compression (TLS compression: Insufficient)"
+    check:
+      subject: tls.compression
+      op: is
+      value: false
+    remediation: Disable TLS-level compression (CRIME attack).

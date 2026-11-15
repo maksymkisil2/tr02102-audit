@@ -1,0 +1,101 @@
+# Overall rating, A+ to F.
+#
+# This scale is the tool's own summary, not part of any standard. It exists
+# because "does not conform to BSI TR-02102-2" says nothing about how far a
+# server is from good practice: a server with RC4 and one that merely offers
+# ChaCha20 both get the same verdict. The rating answers a different question,
+# "how good is this configuration by today's common practice?", using only
+# points on which the standards in this project agree.
+#
+# Every entry describes the good state. The first check that does not hold
+# caps the grade at the given letter. An A becomes an A+ when every bonus
+# check holds. Evaluated by the same engine as the standards.
+version: 1
+
+caps:
+  # F: the connection is not secure or cannot be trusted.
+  - id: RATE-F1
+    grade: F
+    title: SSL 3.0 is accepted
+    check: {subject: tls.protocol_versions, op: none_of, values: [SSL3.0]}
+  - id: RATE-F2
+    grade: F
+    title: Broken cipher suites are accepted (NULL, anonymous, export, RC4, DES)
+    check: {subject: tls.suites_broken, op: empty}
+  - id: RATE-F3
+    grade: F
+    title: The certificate has expired
+    check: {subject: certificate.expired, op: is, value: false}
+  - id: RATE-F4
+    grade: F
+    title: The certificate is not trusted for this host name
+    check: {subject: certificate.trusted, op: is, value: true, detail: certificate.trust_error}
+  - id: RATE-F5
+    grade: F
+    title: The certificate key is too short
+    check:
+      subject: certificate
+      op: key_strength
+      min_bits: {RSA: 2048, EC: 224, Ed25519: 256, Ed448: 448}
+  - id: RATE-F6
+    grade: F
+    title: The certificate is signed with SHA-1 or MD5
+    when: {subject: certificate.signature_hash, op: present}
+    check: {subject: certificate.signature_hash, op: one_of, values: [sha224, sha256, sha384, sha512]}
+  - id: RATE-F7
+    grade: F
+    title: Diffie-Hellman parameters are shorter than 1024 bit
+    when: {subject: tls.dhe_prime_bits, op: present}
+    check: {subject: tls.dhe_prime_bits, op: min, value: 1024}
+
+  # C: obsolete options that every standard here rejects.
+  - id: RATE-C1
+    grade: C
+    title: TLS 1.0 or TLS 1.1 is accepted
+    check: {subject: tls.protocol_versions, op: none_of, values: [TLS1.0, TLS1.1]}
+  - id: RATE-C2
+    grade: C
+    title: 3DES cipher suites are accepted
+    check: {subject: tls.suites_3des, op: empty}
+  - id: RATE-C3
+    grade: C
+    title: Diffie-Hellman parameters are shorter than 2048 bit
+    when: {subject: tls.dhe_prime_bits, op: present}
+    check: {subject: tls.dhe_prime_bits, op: min, value: 2048}
+  - id: RATE-C4
+    grade: C
+    title: No cipher suite with forward secrecy is offered
+    check: {subject: tls.forward_secrecy_supported, op: is, value: true}
+  - id: RATE-C5
+    grade: C
+    title: TLS compression is enabled
+    check: {subject: tls.compression, op: is, value: false}
+
+  # B: works and is not broken, but no longer best practice.
+  - id: RATE-B1
+    grade: B
+    title: Cipher suites without forward secrecy are accepted
+    check: {subject: tls.suites_without_forward_secrecy, op: empty}
+  - id: RATE-B2
+    grade: B
+    title: TLS 1.3 is not offered
+    check: {subject: tls.protocol_versions, op: contains, value: TLS1.3}
+  - id: RATE-B3
+    grade: B
+    title: CBC cipher suites are accepted without Encrypt-then-MAC
+    check: {subject: tls.cbc_without_encrypt_then_mac, op: empty}
+  - id: RATE-B4
+    grade: B
+    title: Extended master secret is not supported
+    when: {subject: tls.protocol_versions, op: contains, value: TLS1.2}
+    check: {subject: tls.extended_master_secret, op: is, value: true}
+  - id: RATE-B5
+    grade: B
+    title: Secure renegotiation is not signalled
+    when: {subject: tls.protocol_versions, op: contains, value: TLS1.2}
+    check: {subject: tls.secure_renegotiation, op: is, value: true}
+
+bonus:
+  - id: RATE-P1
+    title: Hybrid post-quantum key exchange is offered
+    check: {subject: tls.hybrid_pq_groups, op: not_empty}

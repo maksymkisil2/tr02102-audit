@@ -201,12 +201,19 @@ SIGNATURE_SCHEMES: tuple[int, ...] = (
     0x0202,  # ecdsa_sha1, rsa_pkcs1_sha1, dsa_sha1 (legacy)
 )
 
+# No encryption, no authentication, or less than 112 bits of security.
 _BROKEN_MARKERS = ("_NULL_", "_anon_", "_EXPORT_", "_RC4_", "_DES_CBC_", "_DES40_", "_MD5")
 
 
 @dataclass(frozen=True, slots=True)
 class SuiteInfo:
-    """Properties of a cipher suite derived from its IANA name."""
+    """Properties of a cipher suite derived from its IANA name.
+
+    ``broken`` and ``triple_des`` are kept apart on purpose: standards treat
+    them differently. RC4, NULL and export suites are forbidden everywhere,
+    while 3DES (112 bits, 64-bit blocks) is "MUST NOT" in some documents and
+    only "SHOULD NOT" in others.
+    """
 
     name: str
     key_exchange: str
@@ -214,6 +221,11 @@ class SuiteInfo:
     aead: bool
     cbc: bool
     broken: bool
+    triple_des: bool = False
+
+    @property
+    def weak(self) -> bool:
+        return self.broken or self.triple_des
 
 
 def suite_info(name: str) -> SuiteInfo:
@@ -228,5 +240,6 @@ def suite_info(name: str) -> SuiteInfo:
         forward_secrecy=kx.startswith(("DHE_", "ECDHE_")),
         aead=any(m in name for m in ("_GCM_", "_CCM", "_CHACHA20_POLY1305_")),
         cbc="_CBC_" in name,
-        broken=any(m in name for m in _BROKEN_MARKERS) or "_3DES_" in name,
+        broken=any(m in name for m in _BROKEN_MARKERS),
+        triple_des="_3DES_" in name,
     )

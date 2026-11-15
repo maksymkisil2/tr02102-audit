@@ -29,6 +29,8 @@ CONTROLS: dict[str, str] = {
     "dh-parameters": "DH parameter size",
     "cbc-encrypt-then-mac": "CBC with Encrypt-then-MAC",
     "extended-master-secret": "Extended master secret",
+    "secure-renegotiation": "Secure renegotiation",
+    "tls-compression": "TLS compression off",
     "certificate-key": "Certificate key",
     "certificate-signature": "Certificate signature",
     "certificate-validity": "Certificate validity",
@@ -53,6 +55,15 @@ OPERATORS = frozenset(
     }
 )
 SEVERITIES = ("high", "medium", "low", "info")
+
+# What kind of document a rule set comes from. The interface groups standards
+# by this, so a browser vendor's configuration advice is not shown as if it
+# were a regulation.
+CATEGORIES: dict[str, str] = {
+    "government": "Government and regulatory",
+    "international": "International and industry standards",
+    "community": "Community baselines",
+}
 
 
 class StandardError(ValueError):
@@ -86,6 +97,8 @@ class Standard:
     order: int
     rules: tuple[Rule, ...]
     sha256: str
+    category: str = "international"
+    default: bool = True  # evaluated when the user does not choose
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -97,6 +110,7 @@ class Standard:
             "url": self.url,
             "transcription": self.transcription,
             "region": self.region,
+            "category": self.category,
             "sha256": self.sha256,
             "rules": len(self.rules),
         }
@@ -172,6 +186,12 @@ def parse(text: str) -> Standard:
     transcription = _require(data, "transcription", sid)
     if transcription not in ("verified", "draft"):
         raise StandardError(f"{sid}: transcription must be 'verified' or 'draft'")
+    category = _require(data, "category", sid)
+    if category not in CATEGORIES:
+        raise StandardError(f"{sid}: category must be one of {sorted(CATEGORIES)}")
+    default = data.get("default", True)
+    if not isinstance(default, bool):
+        raise StandardError(f"{sid}: default must be true or false")
     return Standard(
         id=sid,
         title=_require(data, "title", sid),
@@ -185,7 +205,14 @@ def parse(text: str) -> Standard:
         order=int(data.get("order", 100)),
         rules=tuple(rules),
         sha256=hashlib.sha256(text.encode()).hexdigest(),
+        category=category,
+        default=default,
     )
+
+
+def defaults(standards: Mapping[str, Standard]) -> list[Standard]:
+    """The standards evaluated when the user makes no choice."""
+    return [s for s in standards.values() if s.default]
 
 
 def load_builtin() -> dict[str, Standard]:

@@ -10,22 +10,41 @@ from tr02102_audit.tls import prober
 from tr02102_audit.tls.registry import HYBRID_PQ_GROUPS, Version, suite_info
 from tr02102_audit.x509 import analyse
 
-OBSERVATION_FORMAT = 1
+OBSERVATION_FORMAT = 2
+
+
+def _all(values: list[bool]) -> bool | None:
+    return all(values) if values else None
 
 
 def _derive(tls: prober.TlsFacts) -> dict[str, Any]:
-    """Turn raw probe results into the fact tree that policies refer to."""
+    """Turn raw probe results into the fact tree that policies refer to.
+
+    ``None`` always means "not determined". The engine reports such a value as
+    inconclusive, so an unknown can never be mistaken for a clean result.
+    """
     accepted = [v for v in Version if tls.versions.get(v) == "accepted"]
     inconclusive = [v for v in Version if tls.versions.get(v) == "inconclusive"]
 
     legacy_all: list[str] = []
+    legacy_known = True
     for key in ("tls12", "tls11", "tls10", "ssl3"):
-        for name in tls.suites.get(key, []):
+        if key in tls.suites and tls.suites[key] is None:
+            legacy_known = False
+        for name in tls.suites.get(key) or []:
             if name not in legacy_all:
                 legacy_all.append(name)
     infos = [suite_info(n) for n in legacy_all]
 
+    def derived(names: list[str]) -> list[str] | None:
+        # A list built from an incomplete enumeration proves what it contains,
+        # but an empty one proves nothing.
+        return names if names or legacy_known else None
+
+    details = list(tls.suite_details.values())
     groups13 = tls.groups_tls13
+    tls13 = Version.TLS13 in accepted
+    forward_secrecy = tls13 or any(i.forward_secrecy for i in infos)
     return {
         "protocol_versions": [str(v) for v in accepted],
         "protocol_versions_inconclusive": [str(v) for v in inconclusive],
@@ -38,19 +57,24 @@ def _derive(tls: prober.TlsFacts) -> dict[str, Any]:
             "ssl3": tls.suites.get("ssl3", []),
             "legacy_all": legacy_all,
         },
-        "suites_without_forward_secrecy": [i.name for i in infos if not i.forward_secrecy],
-        "suites_cbc": [i.name for i in infos if i.cbc],
-        "suites_broken": [i.name for i in infos if i.broken],
-        "cbc_without_encrypt_then_mac": [
-            name
-            for name, detail in tls.suite_details.items()
-            if suite_info(name).cbc and not detail.encrypt_then_mac
-        ],
-        "extended_master_secret": (
-            all(d.extended_master_secret for d in tls.suite_details.values())
-            if tls.suite_details
-            else None
+        "suites_without_forward_secrecy": derived([i.name for i in infos if not i.forward_secrecy]),
+        "suites_cbc": derived([i.name for i in infos if i.cbc]),
+        # NULL, anonymous, export, RC4, DES: forbidden by every standard.
+        "suites_broken": derived([i.name for i in infos if i.broken]),
+        # 3DES: 112-bit strength, 64-bit blocks. "MUST NOT" for some, "SHOULD NOT" for others.
+        "suites_3des": derived([i.name for i in infos if i.triple_des]),
+        "suites_weak": derived([i.name for i in infos if i.weak]),
+        "forward_secrecy_supported": forward_secrecy if forward_secrecy or legacy_known else None,
+        "cbc_without_encrypt_then_mac": derived(
+            [
+                name
+                for name, detail in tls.suite_details.items()
+                if suite_info(name).cbc and not detail.encrypt_then_mac
+            ]
         ),
+        "extended_master_secret": _all([d.extended_master_secret for d in details]),
+        "secure_renegotiation": _all([d.secure_renegotiation for d in details]),
+        "compression": tls.compression,
         "groups": {"tls12": tls.groups_tls12, "tls13": groups13},
         "hybrid_pq_groups": (
             [g for g in groups13 if g in HYBRID_PQ_GROUPS] if groups13 is not None else None
@@ -59,8 +83,13 @@ def _derive(tls: prober.TlsFacts) -> dict[str, Any]:
     }
 
 
-def scan_tls(target: ResolvedTarget, limits: prober.Limits | None = None) -> dict[str, Any]:
-    """Probe ``target`` and return a JSON-serialisable observation."""
+def scan_tls(
+    target: ResolvedTarget, limits: prober.Limits | None = None, *, ca_file: str | None = None
+) -> dict[str, Any]:
+    """Probe ``target`` and return a JSON-serialisable observation.
+
+    ``ca_file`` names extra trusted CA certificates (PEM), for an internal PKI.
+    """
     limits = limits or prober.Limits()
     session = prober.Session(target, limits)
     started = time.monotonic()
@@ -85,13 +114,14 @@ def scan_tls(target: ResolvedTarget, limits: prober.Limits | None = None) -> dic
                 session.notes.append(f"certificate could not be parsed: {exc}")
                 cert = None
             if cert is not None:
-                trusted, error = prober.check_trust(session)
+                trusted, error = prober.check_trust(session, ca_file)
                 cert["trusted"] = trusted
                 cert["trust_error"] = error or None
                 cert["chain_length"] = len(tls.certificate_chain) or None
                 facts["certificate"] = cert
 
     notes = list(session.notes)
+    incomplete = list(dict.fromkeys(session.incomplete))
     if aborted:
         notes.insert(0, f"scan aborted: {aborted}")
     if not facts["tls"]["protocol_versions"] and not aborted:
@@ -110,7 +140,10 @@ def scan_tls(target: ResolvedTarget, limits: prober.Limits | None = None) -> dic
             "ip": target.ip,
             "sni": target.sni,
         },
-        "complete": aborted is None,
+        # False whenever something could not be measured. Such a scan can show
+        # failures, but it can never be reported as conforming.
+        "complete": aborted is None and not incomplete,
+        "incomplete": incomplete,
         "facts": facts,
         "notes": notes,
     }

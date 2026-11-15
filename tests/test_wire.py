@@ -105,7 +105,7 @@ def test_handshake_messages_split_across_records() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "pfs", "aead", "cbc", "broken"),
+    ("name", "pfs", "aead", "cbc", "weak"),
     [
         ("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", True, True, False, False),
         ("TLS_RSA_WITH_AES_128_CBC_SHA", False, False, True, False),
@@ -114,6 +114,53 @@ def test_handshake_messages_split_across_records() -> None:
         ("TLS_AES_256_GCM_SHA384", True, True, False, False),
     ],
 )
-def test_suite_properties(name: str, pfs: bool, aead: bool, cbc: bool, broken: bool) -> None:
+def test_suite_properties(name: str, pfs: bool, aead: bool, cbc: bool, weak: bool) -> None:
     info = suite_info(name)
-    assert (info.forward_secrecy, info.aead, info.cbc, info.broken) == (pfs, aead, cbc, broken)
+    assert (info.forward_secrecy, info.aead, info.cbc, info.weak) == (pfs, aead, cbc, weak)
+
+
+def test_client_hello_avoids_the_256_to_511_byte_range() -> None:
+    # Some load balancers stall on hellos of that size (RFC 7685).
+    for suites in ([0xC02B], list(range(0x0001, 0x0050)), list(range(0x0001, 0x0200))):
+        spec = wire.HelloSpec(
+            client_version=0x0303,
+            cipher_suites=suites,
+            server_name="example.org",
+            groups=[23, 24, 25, 29, 30],
+            signature_schemes=[0x0403, 0x0804, 0x0401],
+        )
+        record = wire.build_client_hello(spec)
+        handshake_length = len(record) - 5
+        assert not 256 <= handshake_length < 512, handshake_length
+        assert int.from_bytes(record[3:5], "big") == handshake_length
+        assert int.from_bytes(record[6:9], "big") == handshake_length - 4
+
+
+def test_key_share_and_compression_offer_are_encoded() -> None:
+    key = bytes(range(32))
+    spec = wire.HelloSpec(
+        client_version=0x0303,
+        cipher_suites=[0x1301],
+        tls13=True,
+        key_shares=((29, key),),
+        compression_methods=(1, 0),
+    )
+    record = wire.build_client_hello(spec)
+    share = struct.pack("!HH", 29, 32) + key
+    assert struct.pack("!HHH", wire.EXT_KEY_SHARE, len(share) + 2, len(share)) + share in record
+    assert b"\x02\x01\x00" in record  # two compression methods: DEFLATE, null
+
+
+def test_server_hello_reports_the_selected_compression_method() -> None:
+    body = struct.pack("!H", 0x0303) + bytes(32) + b"\x00" + struct.pack("!H", 0xC02F) + b"\x01"
+    assert wire.parse_server_hello(body).compression == 1
+    assert wire.parse_server_hello(_server_hello(0xC02F)).compression == 0
+
+
+def test_3des_is_kept_apart_from_broken_ciphers() -> None:
+    des3 = suite_info("TLS_RSA_WITH_3DES_EDE_CBC_SHA")
+    assert (des3.broken, des3.triple_des, des3.weak) == (False, True, True)
+    rc4 = suite_info("TLS_RSA_WITH_RC4_128_SHA")
+    assert (rc4.broken, rc4.triple_des, rc4.weak) == (True, False, True)
+    good = suite_info("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")
+    assert not good.weak and good.forward_secrecy and good.aead

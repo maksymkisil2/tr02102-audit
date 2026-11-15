@@ -26,6 +26,7 @@ EXT_SERVER_NAME = 0
 EXT_SUPPORTED_GROUPS = 10
 EXT_EC_POINT_FORMATS = 11
 EXT_SIGNATURE_ALGORITHMS = 13
+EXT_PADDING = 21
 EXT_ENCRYPT_THEN_MAC = 22
 EXT_EXTENDED_MASTER_SECRET = 23
 EXT_SUPPORTED_VERSIONS = 43
@@ -105,8 +106,12 @@ class HelloSpec:
     server_name: str | None = None
     groups: Sequence[int] = ()
     signature_schemes: Sequence[int] = ()
-    tls13: bool = False  # adds supported_versions and an empty key_share
+    tls13: bool = False  # adds supported_versions and a key_share
     record_version: int = 0x0301
+    # (group, public key) pairs. Empty asks the server to name its group in a
+    # HelloRetryRequest, which is how groups are enumerated without any key.
+    key_shares: Sequence[tuple[int, bytes]] = ()
+    compression_methods: Sequence[int] = (0,)
 
 
 def build_client_hello(spec: HelloSpec) -> bytes:
@@ -126,19 +131,25 @@ def build_client_hello(spec: HelloSpec) -> bytes:
     if spec.tls13:
         extensions += _ext(EXT_SUPPORTED_VERSIONS, _vec8(_u16(0x0304)))
         extensions += _ext(EXT_PSK_KEY_EXCHANGE_MODES, _vec8(b"\x01"))
-        # An empty key_share list: the server must answer with a
-        # HelloRetryRequest naming the group it selected. No key is needed.
-        extensions += _ext(EXT_KEY_SHARE, _vec16(b""))
+        # With an empty list the server must answer with a HelloRetryRequest
+        # naming the group it selected (RFC 8446, 4.2.8). No key is needed.
+        shares = b"".join(_u16(group) + _vec16(key) for group, key in spec.key_shares)
+        extensions += _ext(EXT_KEY_SHARE, _vec16(shares))
     extensions += _ext(EXT_RENEGOTIATION_INFO, _vec8(b""))
 
-    body = (
+    head = (
         _u16(spec.client_version)
         + os.urandom(32)
         + _vec8(os.urandom(32))  # session id, for middlebox compatibility
         + _vec16(_u16_list(spec.cipher_suites))
-        + _vec8(b"\x00")  # compression: null only
-        + _vec16(extensions)
+        + _vec8(bytes(spec.compression_methods))
     )
+    # Some load balancers stall on a ClientHello of 256 to 511 bytes. Browsers
+    # avoid that range with the padding extension (RFC 7685); so does this.
+    length = 4 + len(head) + 2 + len(extensions)
+    if 256 <= length < 512:
+        extensions += _ext(EXT_PADDING, bytes(max(0, 512 - length - 4)))
+    body = head + _vec16(extensions)
     handshake = _u8(HS_CLIENT_HELLO) + _u24(len(body)) + body
     return _u8(CT_HANDSHAKE) + _u16(spec.record_version) + _vec16(handshake)
 
@@ -195,6 +206,7 @@ class ServerHello:
     cipher_suite: int
     is_hrr: bool
     extensions: dict[int, bytes] = field(default_factory=dict)
+    compression: int = 0
 
     @property
     def selected_group(self) -> int | None:
@@ -212,7 +224,7 @@ def parse_server_hello(body: bytes) -> ServerHello:
     random = r.take(32)
     r.vec8()  # session id
     cipher_suite = r.u16()
-    r.u8()  # compression method
+    compression = r.u8()
     extensions: dict[int, bytes] = {}
     if r.remaining:
         ext_reader = Reader(r.vec16())
@@ -236,6 +248,7 @@ def parse_server_hello(body: bytes) -> ServerHello:
         cipher_suite=cipher_suite,
         is_hrr=random == HRR_RANDOM,
         extensions=extensions,
+        compression=compression,
     )
 
 

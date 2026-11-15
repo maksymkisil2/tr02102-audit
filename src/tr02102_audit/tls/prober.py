@@ -4,8 +4,14 @@ Method (see docs/ARCHITECTURE.md, section 6): offer a set of candidates, read
 which one the server picks from the cleartext ServerHello, remove it, and
 repeat until the server refuses. Every probe ends in one of three states:
 accepted, refused, or inconclusive. Inconclusive is never treated as refused.
+
+A refusal and a rate limiter that drops connections look the same on the
+wire. After every enumeration the server is therefore asked once more for a
+value it accepted before; if it no longer answers, the result is marked
+incomplete instead of being reported as a short (and flattering) list.
 """
 
+import os
 import socket
 import ssl
 import time
@@ -43,6 +49,13 @@ class Limits:
     max_bytes_per_connection: int = 256 * 1024
 
 
+RETRIES = 2  # extra attempts for a probe that got no answer
+RETRY_PAUSE = 0.4  # seconds, multiplied by the attempt number
+
+
+X25519 = 29
+
+
 class ScanAbortedError(RuntimeError):
     """A limit was reached; the partial result is reported as inconclusive."""
 
@@ -70,6 +83,9 @@ class Session:
         self.connections = 0
         self.started = time.monotonic()
         self.notes: list[str] = []
+        # Reasons why the collected facts may be missing something. A scan
+        # with any entry here can never be reported as conforming.
+        self.incomplete: list[str] = []
 
     def _check_budget(self) -> None:
         if self.connections >= self.limits.max_connections:
@@ -86,8 +102,33 @@ class Session:
         sock.settimeout(self.limits.read_timeout)
         return sock
 
+    def check_reachable(self) -> None:
+        """Fail fast when the port does not accept TCP connections at all."""
+        try:
+            self.connect().close()
+        except ScanAbortedError:
+            raise
+        except OSError as exc:
+            raise ScanAbortedError(
+                f"cannot connect to {self.target.host}:{self.target.port} "
+                f"({exc.__class__.__name__})"
+            ) from exc
+
     def probe(self, spec: wire.HelloSpec, *, until_done: bool = False) -> Outcome:
-        """Send one ClientHello and classify the reply."""
+        """Send one ClientHello and classify the reply.
+
+        A probe without an answer (timeout, broken reply) is repeated, because
+        a single lost packet must not decide what the report says.
+        """
+        outcome = self._probe_once(spec, until_done)
+        for attempt in range(1, RETRIES + 1):
+            if outcome.kind != "inconclusive":
+                break
+            time.sleep(RETRY_PAUSE * attempt)
+            outcome = self._probe_once(spec, until_done)
+        return outcome
+
+    def _probe_once(self, spec: wire.HelloSpec, until_done: bool) -> Outcome:
         try:
             sock = self.connect()
         except ScanAbortedError:
@@ -176,16 +217,19 @@ def _read_reply(sock: socket.socket, until_done: bool, max_bytes: int) -> Outcom
 class SuiteDetail:
     encrypt_then_mac: bool
     extended_master_secret: bool
+    secure_renegotiation: bool
 
 
 @dataclass(slots=True)
 class TlsFacts:
     versions: dict[str, str] = field(default_factory=dict)
-    suites: dict[str, list[str]] = field(default_factory=dict)
+    # Per version: accepted suites in the server's order, or None if unknown.
+    suites: dict[str, list[str] | None] = field(default_factory=dict)
     suite_details: dict[str, SuiteDetail] = field(default_factory=dict)
     groups_tls12: list[str] | None = None
     groups_tls13: list[str] | None = None
     dhe_prime_bits: int | None = None
+    compression: bool | None = None
     certificate_chain: list[bytes] = field(default_factory=list)
 
 
@@ -198,11 +242,12 @@ def _enumerate(
     until_done: bool = False,
     on_accept: Callable[[int, Outcome], None] | None = None,
     label: str,
-) -> list[int] | None:
+) -> list[int]:
     """Offer all remaining candidates, record the server's pick, repeat.
 
-    Returns the accepted candidates in the server's order of choice, or None
-    if the first probe was inconclusive.
+    Returns the accepted candidates in the server's order of choice. Whenever
+    the list may be missing something, a reason is added to
+    ``session.incomplete``; the caller keeps the partial list as evidence.
     """
     remaining = list(candidates)
     accepted: list[int] = []
@@ -211,16 +256,26 @@ def _enumerate(
         if outcome.kind == "refused":
             break
         if outcome.kind == "inconclusive":
-            session.notes.append(f"{label}: stopped after inconclusive probe ({outcome.reason})")
-            return accepted or None
+            session.incomplete.append(f"{label}: no answer ({outcome.reason})")
+            return accepted
         chosen = pick(outcome)
-        if chosen is None or chosen not in remaining:
-            session.notes.append(f"{label}: server chose a value that was not offered")
-            break
+        if chosen is None:
+            break  # answered, but not with what was asked for: same as a refusal
+        if chosen not in remaining:
+            session.incomplete.append(f"{label}: the server chose a value that was not offered")
+            return accepted
         accepted.append(chosen)
         remaining.remove(chosen)
         if on_accept is not None:
             on_accept(chosen, outcome)
+
+    if accepted and remaining:
+        canary = session.probe(make_spec([accepted[0]]))
+        if canary.kind != "accepted":
+            session.incomplete.append(
+                f"{label}: the server stopped answering during the scan "
+                "(rate limiting?), so the list may be incomplete"
+            )
     return accepted
 
 
@@ -229,9 +284,13 @@ def collect(session: Session) -> TlsFacts:
     target = session.target
     facts = TlsFacts()
     legacy_codes = list(LEGACY_SUITES)
+    session.check_reachable()
 
     def legacy_spec(
-        version: Version, suites: list[int], groups: Sequence[int] = TLS12_EC_GROUPS
+        version: Version,
+        suites: list[int],
+        groups: Sequence[int] = TLS12_EC_GROUPS,
+        compression: Sequence[int] = (0,),
     ) -> wire.HelloSpec:
         return wire.HelloSpec(
             client_version=VERSION_CODES[version],
@@ -240,7 +299,10 @@ def collect(session: Session) -> TlsFacts:
             groups=groups,
             signature_schemes=SIGNATURE_SCHEMES,
             record_version=0x0300 if version is Version.SSL3 else 0x0301,
+            compression_methods=compression,
         )
+
+    with_share = False  # set when the server insists on a key share up front
 
     def tls13_spec(suites: list[int], groups: Sequence[int] = TLS13_GROUPS) -> wire.HelloSpec:
         return wire.HelloSpec(
@@ -250,23 +312,41 @@ def collect(session: Session) -> TlsFacts:
             groups=groups,
             signature_schemes=SIGNATURE_SCHEMES,
             tls13=True,
+            # Any 32 bytes are a valid X25519 public key.
+            key_shares=((X25519, os.urandom(32)),) if with_share else (),
         )
+
+    def is_version(outcome: Outcome, version: Version) -> bool:
+        hello = outcome.server_hello
+        return (
+            outcome.kind == "accepted"
+            and hello is not None
+            and hello.version == VERSION_CODES[version]
+        )
+
+    def record_version(version: Version, outcome: Outcome) -> None:
+        if outcome.kind == "accepted":
+            facts.versions[version] = "accepted" if is_version(outcome, version) else "refused"
+        else:
+            facts.versions[version] = outcome.kind
+        if outcome.kind == "inconclusive":
+            session.incomplete.append(f"{version}: no answer ({outcome.reason})")
 
     # 1. Which protocol versions are accepted?
     for version in (Version.SSL3, Version.TLS10, Version.TLS11, Version.TLS12):
-        outcome = session.probe(legacy_spec(version, legacy_codes))
-        if outcome.kind == "accepted" and outcome.server_hello is not None:
-            ok = outcome.server_hello.version == VERSION_CODES[version]
-            facts.versions[version] = "accepted" if ok else "refused"
-        else:
-            facts.versions[version] = outcome.kind
+        record_version(version, session.probe(legacy_spec(version, legacy_codes)))
     outcome = session.probe(tls13_spec(list(TLS13_SUITES)))
-    hello = outcome.server_hello
-    if outcome.kind == "accepted" and hello is not None:
-        ok = hello.version == VERSION_CODES[Version.TLS13]
-        facts.versions[Version.TLS13] = "accepted" if ok else "refused"
-    else:
-        facts.versions[Version.TLS13] = outcome.kind
+    if not is_version(outcome, Version.TLS13):
+        # Asking the server to choose a group (empty key_share) is valid TLS 1.3,
+        # but a stack that mishandles it must not be reported as "no TLS 1.3".
+        with_share = True
+        second = session.probe(tls13_spec(list(TLS13_SUITES)))
+        if is_version(second, Version.TLS13):
+            outcome = second
+            session.notes.append("TLS1.3: the server only answers when a key share is sent")
+        else:
+            with_share = False
+    record_version(Version.TLS13, outcome)
 
     # 2. Cipher suites per accepted legacy version.
     def pick_suite(o: Outcome) -> int | None:
@@ -286,6 +366,7 @@ def collect(session: Session) -> TlsFacts:
                 facts.suite_details[LEGACY_SUITES[code]] = SuiteDetail(
                     encrypt_then_mac=wire.EXT_ENCRYPT_THEN_MAC in hello.extensions,
                     extended_master_secret=wire.EXT_EXTENDED_MASTER_SECRET in hello.extensions,
+                    secure_renegotiation=wire.EXT_RENEGOTIATION_INFO in hello.extensions,
                 )
             cert = o.message(wire.HS_CERTIFICATE)
             if cert and not facts.certificate_chain:
@@ -311,18 +392,26 @@ def collect(session: Session) -> TlsFacts:
             on_accept=on_accept,
             label=f"{version} cipher suites",
         )
-        facts.suites[FACT_KEY[version]] = (
-            [LEGACY_SUITES[c] for c in accepted] if accepted is not None else []
-        )
+        if accepted:
+            facts.suites[FACT_KEY[version]] = [LEGACY_SUITES[c] for c in accepted]
+        else:
+            # The version was accepted a moment ago, so "no suites" is not an answer.
+            facts.suites[FACT_KEY[version]] = None
+            session.incomplete.append(f"{version} cipher suites: could not be determined")
 
     # 3. TLS 1.3 cipher suites and groups.
     if facts.versions[Version.TLS13] == "accepted":
-        accepted13 = _enumerate(
+        suites13 = _enumerate(
             session, list(TLS13_SUITES), tls13_spec, pick_suite, label="TLS1.3 cipher suites"
         )
-        suites13 = accepted13 or []
-        facts.suites["tls13"] = [TLS13_SUITES[c] for c in suites13]
         if suites13:
+            facts.suites["tls13"] = [TLS13_SUITES[c] for c in suites13]
+        else:
+            facts.suites["tls13"] = None
+            session.incomplete.append("TLS1.3 cipher suites: could not be determined")
+
+        groups13: list[int] = []
+        if suites13 and not with_share:
             groups13 = _enumerate(
                 session,
                 list(TLS13_GROUPS),
@@ -330,16 +419,18 @@ def collect(session: Session) -> TlsFacts:
                 lambda o: o.server_hello.selected_group if o.server_hello else None,
                 label="TLS1.3 groups",
             )
-            if groups13 is not None:
-                facts.groups_tls13 = [GROUPS[g] for g in groups13]
+        if groups13:
+            facts.groups_tls13 = [GROUPS[g] for g in groups13]
+        else:
+            session.incomplete.append("TLS1.3 groups: could not be determined")
 
-    # 4. TLS 1.2 key-exchange groups and DH parameter size.
+    # 4. TLS 1.2 key-exchange groups, DH parameter size and compression.
     best_legacy = next(
-        (v for v in (Version.TLS12, Version.TLS11, Version.TLS10) if FACT_KEY[v] in facts.suites),
+        (v for v in (Version.TLS12, Version.TLS11, Version.TLS10) if facts.suites.get(FACT_KEY[v])),
         None,
     )
     if best_legacy is not None:
-        names = facts.suites[FACT_KEY[best_legacy]]
+        names = facts.suites[FACT_KEY[best_legacy]] or []
         codes = {name: code for code, name in LEGACY_SUITES.items()}
         ecdhe = [codes[n] for n in names if suite_info(n).key_exchange.startswith("ECDHE_")]
         dhe = [codes[n] for n in names if suite_info(n).key_exchange.startswith("DHE_")]
@@ -373,12 +464,17 @@ def collect(session: Session) -> TlsFacts:
                     o = session.probe(legacy_spec(best_legacy, ecdhe, offer), until_done=True)
                     if o.kind == "accepted" and pick_group(o) == group:
                         groups12.append(group)
+                    elif o.kind == "inconclusive":
+                        name = GROUPS.get(group, str(group))
+                        session.incomplete.append(f"TLS1.2 group {name}: no answer ({o.reason})")
                 session.notes.append(
                     "TLS1.2 groups: ECDSA certificate, groups tested one by one; "
                     "a server that prefers its certificate curve may hide others"
                 )
-            if groups12 is not None:
+            if groups12:
                 facts.groups_tls12 = [GROUPS.get(g, f"group_{g}") for g in groups12]
+            else:
+                session.incomplete.append("TLS1.2 groups: could not be determined")
 
         if dhe:
             outcome = session.probe(legacy_spec(best_legacy, dhe), until_done=True)
@@ -388,7 +484,22 @@ def collect(session: Session) -> TlsFacts:
                     params = wire.parse_server_key_exchange(ske, ecdhe=False)
                     facts.dhe_prime_bits = params.dh_prime_bits
                 except wire.ParseError as exc:
-                    session.notes.append(f"DHE parameters unreadable: {exc}")
+                    session.incomplete.append(f"DHE parameters unreadable: {exc}")
+            else:
+                session.incomplete.append("DHE parameters: could not be determined")
+
+        # Does the server pick DEFLATE when it is offered (CRIME)? A server that
+        # rejects the offer outright does not compress either.
+        all_codes = [codes[n] for n in names]
+        outcome = session.probe(legacy_spec(best_legacy, all_codes, compression=(1, 0)))
+        if outcome.kind == "accepted" and outcome.server_hello is not None:
+            facts.compression = outcome.server_hello.compression != 0
+        elif outcome.kind == "refused":
+            facts.compression = False
+        else:
+            session.incomplete.append(f"TLS compression: no answer ({outcome.reason})")
+    elif facts.versions.get(Version.TLS13) == "accepted":
+        facts.compression = False  # TLS 1.3 has no compression
 
     return facts
 
@@ -431,9 +542,32 @@ def fetch_leaf_certificate(session: Session) -> bytes | None:
         return None
 
 
-def check_trust(session: Session) -> tuple[bool | None, str]:
-    """Validate the chain and host name with the system trust store."""
-    ctx = ssl.create_default_context()
+def check_trust(session: Session, ca_file: str | None = None) -> tuple[bool | None, str]:
+    """Validate the chain and host name with the system trust store.
+
+    ``ca_file`` adds trusted CA certificates, for servers that use an internal
+    PKI. The question here is only "does the certificate verify?"; protocol
+    versions and ciphers are judged elsewhere. The context is therefore as
+    permissive as the local TLS library allows, so that a TLS 1.0-only server
+    still gets an answer instead of "unknown".
+
+    Python 3.13 turns on VERIFY_X509_STRICT by default, which rejects
+    certificates that every browser accepts (for example a CA certificate
+    without a key-usage extension). "Trusted" here means what it means to a
+    browser, so the strict flag is cleared.
+    """
+    try:
+        ctx = ssl.create_default_context()
+        ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+        if ca_file:
+            ctx.load_verify_locations(cafile=ca_file)
+    except (OSError, ssl.SSLError) as exc:
+        return None, f"trust store could not be loaded: {exc.__class__.__name__}"
+    try:
+        ctx.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+        ctx.set_ciphers("ALL:@SECLEVEL=0")
+    except (ValueError, ssl.SSLError):
+        pass  # the library's defaults remain; the check may end as "unknown"
     server_name = session.target.sni or session.target.host
     try:
         with session.connect() as sock, ctx.wrap_socket(sock, server_hostname=server_name):

@@ -32,8 +32,11 @@ from tr02102_audit import report
 from tr02102_audit.netguard import TargetError, parse_target, resolve
 from tr02102_audit.scan import scan_tls
 from tr02102_audit.standards import load_builtin
+from tr02102_audit.tls.registry import suite_info
 
 ENV = {**os.environ, "OPENSSL_CONF": "/dev/null"}
+# Extra trusted CA (PEM) for both sides, used when checking the lab servers.
+CA_FILE = os.environ.get("VALIDATION_CA_FILE") or None
 SECLEVEL0 = "@SECLEVEL=0"
 VERSION_FLAGS = {"TLS1.0": "-tls1", "TLS1.1": "-tls1_1", "TLS1.2": "-tls1_2", "TLS1.3": "-tls1_3"}
 TLS13_SUITES = [
@@ -79,8 +82,16 @@ TEMP_KEY_NAMES = {"prime256v1": "secp256r1", "X25519": "x25519", "X448": "x448"}
 # Hosts that exist to exhibit one specific property.
 EXPECTATIONS: dict[str, list[tuple[str, Any]]] = {
     "tls-v1-0.badssl.com": [("versions", ["TLS1.0"])],
-    "rc4.badssl.com": [("has_rc4", True)],
-    "expired.badssl.com": [("expired", True)],
+    "tls-v1-2.badssl.com": [("versions", ["TLS1.2"])],
+    "rc4.badssl.com": [("broken_contains", "_RC4_")],
+    "null.badssl.com": [("broken_contains", "_NULL_")],
+    "3des.badssl.com": [("has_3des", True)],
+    "static-rsa.badssl.com": [("forward_secrecy", False)],
+    "dh1024.badssl.com": [("dhe_bits", 1024)],
+    "expired.badssl.com": [("expired", True), ("trusted", False)],
+    "self-signed.badssl.com": [("trusted", False)],
+    "wrong.host.badssl.com": [("trusted", False)],
+    "mozilla-intermediate.badssl.com": [("trusted", True)],
 }
 
 
@@ -144,7 +155,10 @@ class Target:
 
 
 def summarise(rep: dict[str, Any]) -> str:
-    parts = []
+    rate = rep["rating"]
+    grade = rate["grade"] or f"not rated (at best {rate['at_best']})"
+    reasons = "; ".join(f"{r['grade']}: {r['title']}" for r in rate["reasons"])
+    parts = [f"  rating: {grade}" + (f"  [{reasons}]" if reasons else "")]
     for ev in rep["evaluations"]:
         failing = [f["rule_id"] for f in ev["findings"] if f["status"] == "fail"]
         warning = [f["rule_id"] for f in ev["findings"] if f["status"] == "warn"]
@@ -185,7 +199,7 @@ def check_target(spec: str, names: dict[str, str], groups_ok: dict[str, bool]) -
         print(f"=== {spec}: SKIPPED ({exc})")
         return 0
 
-    obs = scan_tls(resolved)
+    obs = scan_tls(resolved, ca_file=CA_FILE)
     rep = report.build(obs, list(load_builtin().values()))
     tls = obs["facts"]["tls"]
     cert = obs["facts"]["certificate"]
@@ -212,9 +226,11 @@ def check_target(spec: str, names: dict[str, str], groups_ok: dict[str, bool]) -
             print(f"  {key} suites ({len(tls['suites'][key])}): {', '.join(tls['suites'][key])}")
     print(f"  groups: tls13={tls['groups']['tls13']} tls12={tls['groups']['tls12']}")
     print(
-        f"  ems={tls['extended_master_secret']} dhe_bits={tls['dhe_prime_bits']} "
-        f"cbc_without_etm={len(tls['cbc_without_encrypt_then_mac'])} "
-        f"no_pfs={len(tls['suites_without_forward_secrecy'])} broken={tls['suites_broken']}"
+        f"  ems={tls['extended_master_secret']} reneg={tls['secure_renegotiation']} "
+        f"compression={tls['compression']} dhe_bits={tls['dhe_prime_bits']} "
+        f"cbc_without_etm={len(tls['cbc_without_encrypt_then_mac'] or [])} "
+        f"no_pfs={len(tls['suites_without_forward_secrecy'] or [])} "
+        f"broken={tls['suites_broken']} 3des={tls['suites_3des']}"
     )
     if cert:
         print(
@@ -226,25 +242,41 @@ def check_target(spec: str, names: dict[str, str], groups_ok: dict[str, bool]) -
         print("  cert: none retrieved")
     for note in obs["notes"]:
         print(f"  note: {note}")
+    for reason in obs["incomplete"]:
+        print(f"  incomplete: {reason}")
     print(summarise(rep))
     detail = failing_detail(rep)
     if detail:
         print(detail)
 
     # --- protocol versions -------------------------------------------------
-    theirs_versions = {}
+    theirs_versions: dict[str, bool | None] = {}
     for version, flag in VERSION_FLAGS.items():
         extra = [] if version == "TLS1.3" else ["-cipher", f"ALL:eNULL:{SECLEVEL0}"]
         theirs_versions[version] = target.handshake(flag, *extra)
-    ours_versions = {v: tls["version_probes"].get(v) == "accepted" for v in VERSION_FLAGS}
-    compare("protocol versions", ours_versions, theirs_versions)
+    ours_versions: dict[str, bool | None] = {
+        v: tls["version_probes"].get(v) == "accepted" for v in VERSION_FLAGS
+    }
+    # A version that the server only speaks with cipher suites this OpenSSL
+    # build cannot offer (RC4, 3DES) cannot be confirmed or refuted by it.
+    unverifiable_versions = []
+    for version, key in (("TLS1.2", "tls12"), ("TLS1.1", "tls11"), ("TLS1.0", "tls10")):
+        suites = tls["suites"][key] or []
+        mismatch = ours_versions[version] and not theirs_versions[version]
+        if mismatch and suites and not any(suite in names for suite in suites):
+            unverifiable_versions.append(version)
+            ours_versions[version] = theirs_versions[version] = None
+    compare("protocol versions", ours_versions, theirs_versions, unverifiable_versions)
 
     # --- TLS 1.3 cipher suites and groups -----------------------------------
     if ours_versions["TLS1.3"] or theirs_versions["TLS1.3"]:
+        # Security level 0 lets OpenSSL offer the 8-byte-tag CCM suite as well.
         theirs13 = sorted(
-            s for s in TLS13_SUITES if target.handshake("-tls1_3", "-ciphersuites", s)
+            s
+            for s in TLS13_SUITES
+            if target.handshake("-tls1_3", "-ciphersuites", s, "-cipher", f"DEFAULT:{SECLEVEL0}")
         )
-        compare("TLS 1.3 suites", sorted(tls["suites"]["tls13"]), theirs13)
+        compare("TLS 1.3 suites", sorted(tls["suites"]["tls13"] or []), theirs13)
 
         testable = [g for g in GROUPS13 if groups_ok[GROUPS13[g]]]
         theirs_groups = sorted(
@@ -293,7 +325,14 @@ def check_target(spec: str, names: dict[str, str], groups_ok: dict[str, bool]) -
         )
 
     # --- TLS 1.2 ECDHE groups --------------------------------------------------
-    if tls["groups"]["tls12"] is not None and ours_versions["TLS1.2"]:
+    ecdhe_suites = [
+        names[suite]
+        for suite in tls["suites"]["tls12"] or []
+        if suite in names and suite_info(suite).key_exchange.startswith("ECDHE_")
+    ]
+    if tls["groups"]["tls12"] is not None and ours_versions["TLS1.2"] and not ecdhe_suites:
+        print("  ok       TLS 1.2 ECDHE groups: not verifiable (no ECDHE suite OpenSSL can offer)")
+    elif tls["groups"]["tls12"] is not None and ours_versions["TLS1.2"]:
         # With an ECDSA certificate the curve of the certificate has to be
         # offered as well (RFC 8422, 5.1), so it is appended and the group
         # that was actually negotiated is read back.
@@ -304,7 +343,7 @@ def check_target(spec: str, names: dict[str, str], groups_ok: dict[str, bool]) -
             if cert_curve and cert_curve != openssl_name:
                 offer = f"{openssl_name}:{cert_curve}"
             used = target.negotiated_group(
-                "-tls1_2", "-cipher", f"ECDHE:{SECLEVEL0}", "-groups", offer
+                "-tls1_2", "-cipher", f"{':'.join(ecdhe_suites)}:{SECLEVEL0}", "-groups", offer
             )
             if used == group:
                 theirs12.append(group)
@@ -319,17 +358,34 @@ def check_target(spec: str, names: dict[str, str], groups_ok: dict[str, bool]) -
     # --- certificate trust -----------------------------------------------------
     if cert and cert["trusted"] is not None:
         name = resolved.sni or resolved.host
-        verified = target.handshake("-verify_return_error", "-verify_hostname", name)
-        compare("certificate trusted", cert["trusted"], verified)
+        args = ["-verify_return_error", "-verify_hostname", name]
+        args += ["-cipher", f"ALL:{SECLEVEL0}"]
+        if CA_FILE:
+            args += ["-CAfile", CA_FILE]
+        verified, out = target._client(*args)
+        if verified is False and not re.search(r"verif(y|ication) error", out, re.I):
+            # The handshake failed for another reason (no common cipher suite).
+            print(f"  ok       certificate trusted: {cert['trusted']} (OpenSSL cannot connect)")
+        else:
+            compare("certificate trusted", cert["trusted"], verified)
 
     # --- built-in expectations -------------------------------------------------
     for kind, expected in EXPECTATIONS.get(resolved.host, []):
         if kind == "versions":
             compare("expected versions", tls["protocol_versions"], expected)
-        elif kind == "has_rc4":
-            compare("expected RC4 suites", any("RC4" in s for s in tls["suites_broken"]), expected)
+        elif kind == "broken_contains":
+            found = any(expected in s for s in tls["suites_broken"] or [])
+            compare(f"expected a {expected} suite among the broken ones", found, True)
+        elif kind == "has_3des":
+            compare("expected 3DES suites", bool(tls["suites_3des"]), expected)
+        elif kind == "forward_secrecy":
+            compare("expected forward secrecy", tls["forward_secrecy_supported"], expected)
+        elif kind == "dhe_bits":
+            compare("expected DH prime size", tls["dhe_prime_bits"], expected)
         elif kind == "expired":
             compare("expected expired certificate", bool(cert and cert["expired"]), expected)
+        elif kind == "trusted":
+            compare("expected certificate trust", cert["trusted"] if cert else None, expected)
     return mismatches
 
 

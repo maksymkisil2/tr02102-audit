@@ -53,7 +53,7 @@ version = { attr = "tr02102_audit.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-tr02102_audit = ["py.typed"]
+tr02102_audit = ["py.typed", "rating.yaml"]
 "tr02102_audit.standards" = ["*.yaml"]
 "tr02102_audit.web" = ["templates/*.html", "static/*", "demo/*.json"]
 

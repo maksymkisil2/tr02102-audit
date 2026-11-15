@@ -5,12 +5,15 @@ publisher: Mozilla
 edition: "5.7"
 url: https://wiki.mozilla.org/Security/Server_Side_TLS
 description: >
-  The general-purpose profile of Mozilla's server-side TLS guidelines, used by
-  the Mozilla SSL Configuration Generator. Recommended for servers that must
-  support a wide range of clients.
+  Not a formal standard: the configuration advice of the Firefox maker, which
+  system administrators worldwide use through the Mozilla SSL Configuration
+  Generator. Useful as a practical baseline for an ordinary website, and
+  optional here. Nobody certifies against it.
 transcription: draft
-region: International (Mozilla)
-order: 5
+region: Community (Mozilla)
+category: community
+default: false
+order: 8
 
 rules:
   - id: MOZ-I-01
@@ -77,11 +80,11 @@ rules:
 
   - id: MOZ-I-05
     control: broken-ciphers
-    title: No broken or anonymous cipher suites
+    title: No broken, anonymous or 3DES cipher suites
     severity: high
     reference: "Server Side TLS 5.7, Intermediate"
     check:
-      subject: tls.suites_broken
+      subject: tls.suites_weak
       op: empty
     remediation: Remove NULL, anonymous, export, RC4, DES and 3DES cipher suites.
 
