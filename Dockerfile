@@ -1,7 +1,7 @@
 # Web service image. Build:  docker build -t tr02102-audit .
 #                    Run:    docker run -p 8080:8080 -v tr02102-data:/data \
 #                              -e APP_PASSWORD=... -e SECRET_KEY=... tr02102-audit
-FROM python:3.13-slim
+FROM python:3.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
