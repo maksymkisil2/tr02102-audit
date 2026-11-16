@@ -475,6 +475,8 @@ def collect(session: Session) -> TlsFacts:
                 facts.groups_tls12 = [GROUPS.get(g, f"group_{g}") for g in groups12]
             else:
                 session.incomplete.append("TLS1.2 groups: could not be determined")
+        else:
+            facts.groups_tls12 = []  # no ECDHE suite, so no curve is ever negotiated
 
         if dhe:
             outcome = session.probe(legacy_spec(best_legacy, dhe), until_done=True)

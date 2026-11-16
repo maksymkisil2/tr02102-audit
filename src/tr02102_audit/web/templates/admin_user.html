@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_macros.html" import grade_chip %}
+{% block title %}{{ target.login }}{% endblock %}
+{% block content %}
+<h1>{{ target.login }}</h1>
+{% include "_admin_nav.html" %}
+<section class="columns">
+  <form method="post" class="stack sheet">
+    <h3>{{ _('Plan and access') }}</h3>
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save">
+    <div><label for="plan">{{ _('Plan') }}</label>
+      <select id="plan" name="plan">
+        {% for p in plans.values() %}<option value="{{ p.id }}"{% if p.id == target.plan %} selected{% endif %}>{{ p.name }} ({{ p.checks_per_month }} / {{ _('month') }})</option>{% endfor %}
+      </select>
+      <p class="hint">{{ _('%(n)s checks used this month.', n=used) }}</p></div>
+    <div><label for="credits">{{ _('Prepaid checks') }}</label>
+      <input id="credits" name="credits" type="number" min="0" max="1000000" value="{{ target.credits }}"></div>
+    <label class="check"><input type="checkbox" name="role" value="admin"{% if target.role == 'admin' %} checked{% endif %}><span>{{ _('Administrator') }}</span></label>
+    <label class="check"><input type="checkbox" name="blocked" value="yes"{% if target.blocked %} checked{% endif %}><span>{{ _('Blocked: cannot sign in') }}</span></label>
+    <div><button class="btn" type="submit">{{ _('Save') }}</button></div>
+  </form>
+
+  <div class="sheet">
+    <h3>{{ _('About this account') }}</h3>
+    <dl class="facts">
+      <dt>{{ _('Created') }}</dt><dd>{{ target.created_at|when }} UTC</dd>
+      <dt>{{ _('Last sign-in') }}</dt><dd>{{ target.last_login_at|when or '–' }}</dd>
+      <dt>{{ _('Language') }}</dt><dd>{{ target.locale or '–' }}</dd>
+      <dt>Stripe</dt><dd class="code small">{{ target.stripe_customer_id or '–' }}</dd>
+    </dl>
+    <p><a href="{{ url_for('admin.events', q=target.login) }}">{{ _('Audit log of this account') }}</a></p>
+  </div>
+</section>
+
+<section>
+  <h2>{{ _('Latest checks') }}</h2>
+  <div class="sheet scroll">
+    <table>
+      <tbody>
+        {% for s in scans %}
+          <tr><td class="nowrap small">{{ s.created_at|when }}</td>
+            <td><a class="code" href="{{ url_for('account.report_page', public_id=s.public_id) }}">{{ s.host }}:{{ s.port }}</a></td>
+            <td>{% if s.status == 'done' %}{{ grade_chip(s.grade) }}{% else %}{{ _(s.status) }}{% endif %}</td></tr>
+        {% else %}
+          <tr><td class="quiet">{{ _('Nothing recorded yet.') }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="columns">
+  <form method="post" class="stack sheet">
+    <h3>{{ _('Set a new password') }}</h3>
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="password">
+    <div><label for="password">{{ _('New password') }}</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="{{ min_password }}" required></div>
+    <div><button class="btn plain" type="submit">{{ _('Replace password') }}</button></div>
+  </form>
+  {% if not is_self %}
+    <form method="post" class="stack sheet">
+      <h3>{{ _('Delete account') }}</h3>
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="delete">
+      <p class="quiet">{{ _('Deletes the account and all its reports. This cannot be undone.') }}</p>
+      <div><button class="btn danger" type="submit">{{ _('Delete this account') }}</button></div>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}

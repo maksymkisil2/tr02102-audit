@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Imprint') }}{% endblock %}
+{% block content %}
+<section>
+  <h1>{{ _('Imprint') }}</h1>
+  {% if operator.name and operator.address and operator.email %}
+    <div class="sheet">
+      <dl class="facts">
+        <dt>{{ _('Operator') }}</dt><dd>{{ operator.name }}</dd>
+        <dt>{{ _('Address') }}</dt><dd>{{ operator.address }}</dd>
+        <dt>{{ _('E-mail') }}</dt><dd><a href="mailto:{{ operator.email }}">{{ operator.email }}</a></dd>
+        {% if operator.vat_id %}<dt>{{ _('VAT ID') }}</dt><dd>{{ operator.vat_id }}</dd>{% endif %}
+      </dl>
+    </div>
+  {% else %}
+    <p class="note caution">{{ _('The operator of this instance has not entered their details yet (OPERATOR_NAME, OPERATOR_ADDRESS, OPERATOR_EMAIL). Paid plans stay switched off until they are set.') }}</p>
+  {% endif %}
+  <p class="quiet small">{{ _('The software is open source (Apache-2.0). Whoever runs an instance is responsible for it.') }}</p>
+</section>
+{% endblock %}

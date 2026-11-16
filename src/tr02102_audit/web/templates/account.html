@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Account') }}{% endblock %}
+{% block content %}
+<section>
+  <h1>{{ _('Account') }}</h1>
+  {% if request.args.get('paid') %}
+    <p class="flash ok" role="status">{{ _('Thank you. The payment is being confirmed; your plan updates within a minute.') }}</p>
+  {% endif %}
+  <div class="sheet">
+    <dl class="facts">
+      <dt>{{ _('Login name') }}</dt><dd>{{ user.login }}</dd>
+      <dt>{{ _('Plan') }}</dt><dd>{{ plan.name }}{% if is_admin %} <span class="tag">{{ _('administrator') }}</span>{% endif %}</dd>
+      <dt>{{ _('This month') }}</dt><dd>{% if allowance.unlimited %}{{ _('no limit') }}{% else %}{{ _('%(used)s of %(included)s checks used', used=allowance.used, included=allowance.included) }}{% endif %}</dd>
+      <dt>{{ _('Prepaid checks') }}</dt><dd>{{ allowance.credits }}</dd>
+      <dt>{{ _('Member since') }}</dt><dd>{{ user.created_at|when('%Y-%m-%d') }}</dd>
+    </dl>
+    <div class="actions">
+      <a class="btn plain slim" href="{{ url_for('public.pricing') }}">{{ _('See the plans') }}</a>
+      {% if stripe_enabled and user.stripe_customer_id %}
+        <form method="post" action="{{ url_for('billing.portal') }}" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+          <button class="btn plain slim" type="submit">{{ _('Manage subscription and invoices') }}</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="narrow">
+  <h2>{{ _('Change password') }}</h2>
+  <form method="post" class="stack sheet">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="password">
+    <div><label for="current">{{ _('Current password') }}</label>
+      <input id="current" name="current" type="password" autocomplete="current-password" required></div>
+    <div><label for="password">{{ _('New password') }}</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="{{ min_password }}" required>
+      <p class="hint">{{ _('At least %(n)s characters. A long phrase is better than a short puzzle.', n=min_password) }}</p></div>
+    <div><label for="password2">{{ _('New password, once more') }}</label>
+      <input id="password2" name="password2" type="password" autocomplete="new-password" required></div>
+    <button class="btn" type="submit">{{ _('Change password') }}</button>
+  </form>
+</section>
+
+<section class="narrow">
+  <h2>{{ _('Delete account') }}</h2>
+  <p class="quiet">{{ _('Deletes the account and all its reports. This cannot be undone. A running subscription has to be cancelled first.') }}</p>
+  <form method="post" class="stack sheet">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="delete">
+    <div><label for="current2">{{ _('Current password') }}</label>
+      <input id="current2" name="current" type="password" autocomplete="current-password" required></div>
+    <button class="btn danger" type="submit">{{ _('Delete my account') }}</button>
+  </form>
+</section>
+{% endblock %}

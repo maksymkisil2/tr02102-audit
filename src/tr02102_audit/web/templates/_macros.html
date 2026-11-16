@@ -1,0 +1,58 @@
+{# Shared pieces: the rating seal, verdict stamps, pagination. #}
+{% macro grade_class(grade) -%}
+  grade-{{ {'A+': 'a', 'A': 'a', 'B': 'b', 'C': 'c', 'F': 'f'}.get(grade, 'none') }}
+{%- endmacro %}
+
+{% macro seal(grade, size='') -%}
+<svg class="seal {{ size }} {{ grade_class(grade) }}" viewBox="0 0 120 120" role="img"
+     aria-label="{{ _('Rating') }}: {{ grade or _('not rated') }}">
+  <circle class="seal-ring" cx="60" cy="60" r="55"/>
+  <g class="seal-ticks">
+    {%- for i in range(12) %}<line x1="60" y1="9" x2="60" y2="15" transform="rotate({{ i * 30 }} 60 60)"/>{% endfor -%}
+  </g>
+  <circle class="seal-face" cx="60" cy="60" r="39"/>
+  <text class="seal-letter" x="60" y="61" text-anchor="middle" dominant-baseline="central">{{ grade or '?' }}</text>
+</svg>
+{%- endmacro %}
+
+{% macro grade_chip(grade) -%}
+<span class="grade-chip {{ grade_class(grade) }}">{{ grade or '?' }}</span>
+{%- endmacro %}
+
+{% set verdict_text = {
+  'pass': 'Conforms',
+  'pass_with_warnings': 'Conforms, with warnings',
+  'fail': 'Does not conform',
+  'incomplete': 'Incomplete',
+} %}
+{% set status_text = {
+  'pass': 'Met',
+  'fail': 'Not met',
+  'warn': 'Warning',
+  'inconclusive': 'Unknown',
+  'not_applicable': 'Not applicable',
+} %}
+
+{% macro verdict(value) -%}
+<span class="stamp {{ value }}">{{ _(verdict_text[value]) }}</span>
+{%- endmacro %}
+
+{% macro status(value, bare=false) -%}
+  {%- if value is none -%}<span class="quiet" title="{{ _('This standard has no rule for it') }}">·</span>
+  {%- elif bare and value == 'not_applicable' -%}<span class="quiet" title="{{ _('Not applicable') }}">–</span>
+  {%- else -%}<span class="stamp {{ value }}{% if bare %} bare{% endif %}">{{ _(status_text[value]) }}</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro pager(page, pages) -%}
+  {% if pages > 1 %}
+  {% set args = request.args.to_dict() %}
+  {% set _dropped = args.pop('page', none) %}
+  {% set params = dict(request.view_args or {}, **args) %}
+  <nav class="pager" aria-label="{{ _('Pages') }}">
+    {% if page > 1 %}<a href="{{ url_for(request.endpoint, page=page - 1, **params) }}">{{ _('Newer') }}</a>{% endif %}
+    <span class="quiet">{{ _('Page %(page)s of %(pages)s', page=page, pages=pages) }}</span>
+    {% if page < pages %}<a href="{{ url_for(request.endpoint, page=page + 1, **params) }}">{{ _('Older') }}</a>{% endif %}
+  </nav>
+  {% endif %}
+{%- endmacro %}

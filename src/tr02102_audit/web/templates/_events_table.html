@@ -1,0 +1,17 @@
+<table>
+  <thead><tr><th>{{ _('Time (UTC)') }}</th><th>{{ _('Event') }}</th><th>{{ _('Who') }}</th><th>{{ _('From') }}</th><th>{{ _('Details') }}</th></tr></thead>
+  <tbody>
+    {% for e in (events if events is defined else recent) %}
+      <tr>
+        <td class="nowrap small">{{ e.ts|when('%Y-%m-%d %H:%M:%S') }}</td>
+        <td class="nowrap"><span class="tag {{ 'bad' if e.kind.endswith(('failed', 'blocked', 'rejected', 'denied', 'error')) else 'good' if e.kind.endswith('.ok') else '' }}">{{ e.kind }}</span></td>
+        <td>{% if e.user_id %}<a href="{{ url_for('admin.user_page', user_id=e.user_id) }}">{{ e.login }}</a>{% else %}{{ e.login or '–' }}{% endif %}</td>
+        <td class="small">{% if e.ip %}<a class="code" href="{{ url_for('admin.events', q=e.ip) }}">{{ e.ip }}</a>{% endif %}{% if e.country %} <span class="tag">{{ e.country }}</span>{% endif %}
+          {% if e.user_agent %}<br><span class="quiet">{{ e.user_agent[:70] }}</span>{% endif %}</td>
+        <td class="small">{{ e.detail }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="quiet">{{ _('Nothing recorded yet.') }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

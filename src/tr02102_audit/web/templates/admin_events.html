@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_macros.html" import pager with context %}
+{% block title %}{{ _('Audit log') }}{% endblock %}
+{% block content %}
+<h1>{{ _('Audit log') }}</h1>
+{% include "_admin_nav.html" %}
+<section>
+  <p class="quiet">{{ _('Every sign-in, failed sign-in, check and change, with the address it came from. Entries are deleted after %(n)s days.', n=retention_days) }}</p>
+  <form method="get" class="row sheet">
+    <div>
+      <label for="kind">{{ _('Kind') }}</label>
+      <select id="kind" name="kind">
+        <option value="">{{ _('all') }}</option>
+        {% for g in groups %}<option value="{{ g }}"{% if g == kind %} selected{% endif %}>{{ g }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="grow">
+      <label for="q">{{ _('Login name, address or text') }}</label>
+      <input id="q" name="q" type="search" value="{{ q }}">
+    </div>
+    <button class="btn" type="submit">{{ _('Filter') }}</button>
+  </form>
+  <p class="quiet small">{{ _('%(n)s entries', n=total) }}</p>
+  <div class="sheet scroll">
+    {% include "_events_table.html" %}
+  </div>
+  {{ pager(page, pages) }}
+</section>
+{% endblock %}

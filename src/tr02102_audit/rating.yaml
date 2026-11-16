@@ -97,5 +97,5 @@ caps:
 
 bonus:
   - id: RATE-P1
-    title: Hybrid post-quantum key exchange is offered
+    title: hybrid post-quantum key exchange
     check: {subject: tls.hybrid_pq_groups, op: not_empty}

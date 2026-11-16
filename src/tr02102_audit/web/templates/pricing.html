@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Plans') }}{% endblock %}
+{% block content %}
+<section>
+  <h1>{{ _('Plans') }}</h1>
+  <p class="lead">{{ _('You pay for checks. One check is one server address, measured once and compared with as many standards as you like. Opening a stored report again is free.') }}</p>
+  {% if is_admin and stripe_enabled and not billing_ready %}
+    <p class="note caution">{{ _('Card payment is configured, but the operator details (name, address, e-mail) are missing. Selling stays switched off until they are set.') }}</p>
+  {% endif %}
+
+  <div class="sheet scroll">
+    <table class="plans">
+      <thead>
+        <tr><th></th>{% for p in plans.values() %}<th>{{ p.name }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        <tr><th>{{ _('Price per month') }}</th>
+          {% for p in plans.values() %}<td><span class="price">{% if p.price_eur %}{{ p.price_eur }} €{% else %}0 €{% endif %}</span></td>{% endfor %}</tr>
+        <tr><th>{{ _('Checks per month') }}</th>{% for p in plans.values() %}<td>{{ p.checks_per_month }}</td>{% endfor %}</tr>
+        <tr><th>{{ _('Price per check') }}</th>
+          {% for p in plans.values() %}<td>{% if p.price_eur %}{{ '%.2f'|format(p.price_eur / p.checks_per_month) }} €{% else %}–{% endif %}</td>{% endfor %}</tr>
+        <tr><th>{{ _('Reports are kept') }}</th>{% for p in plans.values() %}<td>{{ _('%(n)s days', n=p.history_days) }}</td>{% endfor %}</tr>
+        <tr><th>{{ _('All standards, JSON and SARIF export') }}</th>{% for p in plans.values() %}<td>{{ _('yes') }}</td>{% endfor %}</tr>
+        <tr><th>{{ _('Made for') }}</th>{% for p in plans.values() %}<td class="small">{{ _(p.audience) }}</td>{% endfor %}</tr>
+        <tr class="no-print"><th></th>
+          {% for p in plans.values() %}
+            <td>
+              {% if p.id == 'free' %}
+                {% if not user and registration_open %}<a class="btn plain slim" href="{{ url_for('public.register') }}">{{ _('Create account') }}</a>{% endif %}
+              {% elif user and user.plan == p.id %}<span class="tag good">{{ _('your plan') }}</span>
+              {% elif billing_ready and sells[p.id] and user %}
+                <form method="post" action="{{ url_for('billing.checkout') }}" class="inline">
+                  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+                  <input type="hidden" name="product" value="{{ p.id }}">
+                  <button class="btn slim" type="submit">{{ _('Subscribe') }}</button>
+                </form>
+              {% elif billing_ready and sells[p.id] %}<a class="btn plain slim" href="{{ url_for('public.login', next=url_for('public.pricing')) }}">{{ _('Sign in to subscribe') }}</a>
+              {% else %}<span class="quiet small">{{ _('On request') }}</span>{% endif %}
+            </td>
+          {% endfor %}</tr>
+      </tbody>
+    </table>
+  </div>
+  {% if price_note %}<p class="quiet small">{{ price_note }}</p>{% endif %}
+</section>
+
+<section>
+  <h2>{{ _('Only need it once?') }}</h2>
+  <p>{{ _('%(n)s prepaid checks for %(price)s €, without a subscription. They are used after the monthly allowance and do not expire.', n=pack_checks, price=pack_price) }}</p>
+  {% if billing_ready and sells['credits'] and user %}
+    <form method="post" action="{{ url_for('billing.checkout') }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="product" value="credits">
+      <button class="btn" type="submit">{{ _('Buy %(n)s checks', n=pack_checks) }}</button>
+    </form>
+  {% elif not billing_ready %}
+    <p class="quiet">{{ _('Card payment is not available on this instance yet.') }}</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>{{ _('How payment works') }}</h2>
+  <p>{{ _('Payment runs on a page hosted by Stripe. Card numbers never reach this service. A subscription can be cancelled at any time from the account page and then ends with the paid month.') }}</p>
+</section>
+{% endblock %}

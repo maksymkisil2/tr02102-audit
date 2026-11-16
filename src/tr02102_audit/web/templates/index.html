@@ -1,67 +1,98 @@
 {% extends "base.html" %}
+{% from "_macros.html" import seal, verdict, grade_chip %}
 {% block content %}
 <section class="hero">
-  <p class="eyebrow">TLS configuration audit</p>
-  <h1>Check a server's encryption against BSI TR-02102 and international standards.</h1>
-  <p class="lead">The scanner connects to a server, records exactly which protocol versions,
-    cipher suites and key-exchange groups it accepts, and evaluates the result against
-    several standards side by side. Every finding cites the section it comes from.</p>
-  <div class="hero-actions">
-    {% if logged_in %}
-      <a class="btn" href="{{ url_for('scan') }}">Start a scan</a>
-    {% elif scanning_enabled %}
-      <a class="btn" href="{{ url_for('login') }}">Sign in to scan</a>
+  <div>
+    <h1>{{ _('See what your server’s encryption really accepts, and which standards it meets.') }}</h1>
+    <p class="lead">{{ _('One check measures the TLS configuration of a server and compares it with BSI TR-02102, NIST, IETF, NCSC-NL and PCI DSS side by side. Every finding names the section it comes from.') }}</p>
+    {% if can_sign_in %}
+      <form method="get" action="{{ url_for('account.scan') }}" class="row">
+        <div class="grow">
+          <label for="target">{{ _('Server to check') }}</label>
+          <input id="target" name="target" type="text" placeholder="example.org" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <button class="btn" type="submit">{{ _('Check server') }}</button>
+      </form>
+      <p class="hint">{% if not user %}{{ _('Checking needs an account.') }} {% if registration_open %}<a href="{{ url_for('public.register') }}">{{ _('Create one for free') }}</a>{% else %}<a href="{{ url_for('public.login') }}">{{ _('Sign in') }}</a>{% endif %}{% endif %}</p>
+    {% else %}
+      <p class="note">{{ _('Checking is switched off on this instance: no administrator account exists. The sample reports work.') }}</p>
     {% endif %}
-    <a class="btn btn-ghost" href="{{ url_for('demo', name='tls-weak') }}">See a sample report</a>
   </div>
-  {% if not scanning_enabled %}
-    <p class="muted small">Scanning is disabled on this instance (no password configured). The demo reports work.</p>
-  {% endif %}
-</section>
 
-<section class="grid3">
-  <div class="card">
-    <h3>Facts, then judgment</h3>
-    <p>Hand-built TLS handshakes enumerate what the server really accepts. A separate engine
-      evaluates the facts, so one scan can be judged against any number of standards.</p>
-  </div>
-  <div class="card">
-    <h3>Standards as data</h3>
-    <p>Each standard is a YAML file under code review. Adding one needs no code. The comparison view
-      shows where standards agree and where they differ.</p>
-  </div>
-  <div class="card">
-    <h3>Inconclusive is never "pass"</h3>
-    <p>A timeout or dropped connection is reported as inconclusive. Network trouble cannot
-      turn into a clean audit result.</p>
-  </div>
-</section>
-
-<section>
-  <h2>Sample reports</h2>
-  <p class="muted">Recorded against the two servers of the project's test lab.</p>
-  <div class="grid2">
-    {% for name, title in demos.items() %}
-      <a class="card card-link" href="{{ url_for('demo', name=name) }}">
-        <span class="mono">{{ name }}</span>
-        <span class="muted">{{ title }}</span>
-      </a>
-    {% endfor %}
-  </div>
-</section>
-
-<section>
-  <h2>Available standards</h2>
-  <div class="grid3">
-    {% for s in standards %}
-      <div class="card">
-        <p class="eyebrow">{{ s.region }}</p>
-        <h3>{{ s.short_name }} <span class="muted small">{{ s.edition }}</span></h3>
-        <p class="small">{{ s.description }}</p>
-        <p class="small muted">{{ s.rules|length }} rules{% if s.transcription == 'draft' %} · draft transcription{% endif %}</p>
+  <aside class="specimen" aria-label="{{ _('Sample report') }}">
+    <div class="specimen-head">
+      {{ seal(sample.rating.grade) }}
+      <div>
+        <p><strong>{{ _('A typical modern website') }}</strong></p>
+        <p class="quiet small">{{ _('Good practice, rating A. Two government standards still say no: they only accept algorithms on their own approved lists.') }}</p>
       </div>
-    {% endfor %}
+    </div>
+    <table>
+      <tbody>
+        {% for ev in sample.evaluations %}
+          <tr><td>{{ ev.standard.short_name }}</td><td>{{ verdict(ev.verdict) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="specimen-foot small"><a href="{{ url_for('public.demo', name='tls-typical') }}">{{ _('Open this sample report') }}</a></p>
+  </aside>
+</section>
+
+<section>
+  <h2>{{ _('How a check works') }}</h2>
+  <ol class="steps">
+    <li><h3>{{ _('Measure') }}</h3>
+      <p>{{ _('The scanner opens a few dozen short connections and records which protocol versions, cipher suites and key-exchange groups the server accepts. It measures; it does not guess from a banner.') }}</p></li>
+    <li><h3>{{ _('Compare') }}</h3>
+      <p>{{ _('The same facts are evaluated against each standard. “Must” in the standard is a failure, “should” is a warning, exactly as the document words it.') }}</p></li>
+    <li><h3>{{ _('Explain') }}</h3>
+      <p>{{ _('The report gives an overall rating from A+ to F, a verdict per standard, and for every finding the reason, the evidence and the fix.') }}</p></li>
+  </ol>
+</section>
+
+<section>
+  <h2>{{ _('“Does not conform” is not the same as “insecure”') }}</h2>
+  <p>{{ _('BSI TR-02102 and NIST SP 800-52 accept only the algorithms on their approved lists. ChaCha20 and Curve25519, which most of the internet uses, are on neither list, so an ordinary well-run website does not conform to them.') }}</p>
+  <p>{{ _('That is why a report shows two things: the rating says how good the configuration is by common practice, and the verdicts say which formal standards it meets. A report also marks failures that come only from an approved list.') }}</p>
+</section>
+
+<section>
+  <h2>{{ _('Sample reports') }}</h2>
+  <p class="quiet">{{ _('Recorded in the project’s test lab and evaluated with the current rules.') }}</p>
+  <div class="scroll">
+    <table>
+      <tbody>
+        {% for name, title in demos.items() %}
+          <tr>
+            <td class="nowrap">{{ grade_chip(grades[name]) }}</td>
+            <td><a href="{{ url_for('public.demo', name=name) }}">{{ _(title) }}</a></td>
+            <td class="quiet code">{{ name }}.lab.test</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
-  <p><a href="{{ url_for('standards_page') }}">All rules and references →</a></p>
+</section>
+
+<section>
+  <h2>{{ _('Standards') }}</h2>
+  <div class="scroll">
+    <table>
+      <tbody>
+        {% for key, label in categories.items() %}
+          <tr class="group"><th colspan="4">{{ _(label) }}</th></tr>
+          {% for s in standards if s.category == key %}
+            <tr>
+              <td class="nowrap"><strong>{{ s.short_name }}</strong></td>
+              <td>{{ s.publisher }}</td>
+              <td class="quiet nowrap">{{ s.edition }}</td>
+              <td class="quiet">{% if not s.default %}{{ _('optional') }}{% endif %}</td>
+            </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p><br><a href="{{ url_for('public.standards_page') }}">{{ _('All rules, and how this relates to ISO 27001, NIS2 and GDPR') }}</a></p>
 </section>
 {% endblock %}

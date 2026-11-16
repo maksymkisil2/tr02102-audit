@@ -1,38 +1,62 @@
 {% extends "base.html" %}
-{% block title %}Standards · tr02102-audit{% endblock %}
+{% block title %}{{ _('Standards') }}{% endblock %}
 {% block content %}
 <section>
-  <h1>Standards</h1>
-  <p class="lead">Each standard is a YAML file in the source repository. Every rule maps to one shared
-    control, which is what makes standards comparable side by side.</p>
+  <h1>{{ _('Standards') }}</h1>
+  <p class="lead">{{ _('Each standard is a data file under code review. Every rule cites its section and says whether the document requires it or recommends it.') }}</p>
 </section>
 
-{% for s in standards %}
-<section class="card">
-  <p class="eyebrow">{{ s.region }} · {{ s.publisher }}</p>
-  <h2>{{ s.title }}</h2>
-  <p class="small muted">Edition {{ s.edition }} · {{ s.rules|length }} rules ·
-    transcription: {{ s.transcription }} · <a href="{{ s.url }}" rel="noopener noreferrer">source</a></p>
-  <p class="small">{{ s.description }}</p>
-  {% if s.transcription == 'draft' %}
-    <p class="note small">Draft transcription: rules still need a line-by-line review against the official document.</p>
-  {% endif %}
-  <div class="table-scroll">
-    <table class="rules">
-      <thead><tr><th>Rule</th><th>Control</th><th>Requirement</th><th>Severity</th><th>Reference</th></tr></thead>
+<section>
+  <h2>{{ _('Certificates and regulations: where a report counts') }}</h2>
+  <p>{{ _('ISO/IEC 27001, PCI DSS or SOC 2 certificates are issued by accredited auditors after assessing a whole organisation. No scanner can award them. What auditors ask for is evidence that encryption in transit follows a recognised technical standard. A report from this tool is that evidence.') }}</p>
+  <div class="sheet scroll">
+    <table>
+      <thead><tr><th>{{ _('Framework') }}</th><th>{{ _('Clause') }}</th><th>{{ _('What it asks for') }}</th><th>{{ _('Certificate') }}</th></tr></thead>
       <tbody>
-        {% for rule in s.rules %}
+        {% for f in frameworks %}
           <tr>
-            <td class="mono nowrap">{{ rule.id }}</td>
-            <td class="nowrap">{{ controls[rule.control] }}</td>
-            <td>{{ rule.title }}</td>
-            <td><span class="sev sev-{{ rule.severity }}">{{ rule.severity }}</span></td>
-            <td class="small muted">{{ rule.reference }}</td>
+            <td class="nowrap"><strong>{{ f.name }}</strong></td>
+            <td>{{ f.clause }}</td>
+            <td>{{ _(f.asks) }}</td>
+            <td>{{ _('by an auditor') if f.certified else _('no; a legal duty') }}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  <p class="quiet small">{{ _('None of these frameworks lists cipher suites. They point to the state of the art, which in practice means the technical standards below.') }}</p>
+</section>
+
+{% for key, label in categories.items() %}
+<section>
+  <h2>{{ _(label) }}</h2>
+  {% if key == 'community' %}<p class="quiet">{{ _('Not formal standards. They are widely used configuration advice and are optional in a check.') }}</p>{% endif %}
+  {% for s in standards if s.category == key %}
+    <details class="sheet">
+      <summary>{{ s.title }}</summary>
+      <p class="small quiet">{{ s.publisher }}, {{ s.region }}. {{ _('Edition') }} {{ s.edition }}, {{ _('%(n)s rules', n=s.rules|length) }}. <a href="{{ s.url }}" rel="noopener noreferrer">{{ _('Official source') }}</a></p>
+      <p>{{ s.description }}</p>
+      {% if s.transcription == 'draft' %}
+        <p class="note caution small">{{ _('Draft transcription: these rules still await a line-by-line review against the official document.') }}</p>
+      {% endif %}
+      <div class="scroll">
+        <table>
+          <thead><tr><th>{{ _('Rule') }}</th><th>{{ _('Topic') }}</th><th>{{ _('Requirement') }}</th><th>{{ _('Level') }}</th><th>{{ _('Reference') }}</th></tr></thead>
+          <tbody>
+            {% for rule in s.rules %}
+              <tr>
+                <td class="code nowrap">{{ rule.id }}</td>
+                <td>{{ _(controls[rule.control]) }}</td>
+                <td>{{ rule.title }}</td>
+                <td><span class="tag">{{ _('recommended') if rule.on_violation == 'warn' else _('required') }}</span></td>
+                <td class="small quiet">{{ rule.reference }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  {% endfor %}
 </section>
 {% endfor %}
 {% endblock %}
