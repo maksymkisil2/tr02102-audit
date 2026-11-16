@@ -41,6 +41,7 @@ def _wait(port: int) -> None:
 
 
 GEN_CERTS = Path(__file__).resolve().parent.parent / "lab" / "scripts" / "gen-certs.sh"
+CERT = {"rsa-only": "typical"}  # servers that reuse another server's certificate
 
 
 @pytest.fixture(scope="module")
@@ -58,7 +59,7 @@ def lab(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, int | st
         capture_output=True,
         env={"OUT": str(d), "DAYS": "30", "PATH": "/usr/bin:/bin:/usr/local/bin"},
     )
-    ports = {"good": _free_port(), "typical": _free_port(), "weak": _free_port()}
+    ports = {n: _free_port() for n in ("good", "typical", "weak", "rsa-only")}
     no_legacy = ["-no_ssl3", "-no_tls1", "-no_tls1_1"]
     args = {
         "good": [
@@ -78,6 +79,7 @@ def lab(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, int | st
             "X25519:prime256v1:secp384r1",
         ],
         "weak": ["-no_tls1_3", "-cipher", "ALL:@SECLEVEL=0"],
+        "rsa-only": ["-no_tls1_3", *no_legacy, "-cipher", "AES128-GCM-SHA256"],
     }
     procs = [
         subprocess.Popen(
@@ -87,9 +89,9 @@ def lab(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, int | st
                 "-accept",
                 str(ports[n]),
                 "-cert",
-                str(d / f"tls-{n}.crt"),
+                str(d / f"tls-{CERT.get(n, n)}.crt"),
                 "-key",
-                str(d / f"tls-{n}.key"),
+                str(d / f"tls-{CERT.get(n, n)}.key"),
                 "-quiet",
                 *args[n],
             ],
@@ -167,6 +169,21 @@ def test_weak_server(lab: dict[str, int | str]) -> None:
     assert set(_verdicts(rep).values()) == {"fail"}
     assert rep["rating"]["grade"] == "F"
     assert not any(e["off_list_only"] for e in rep["evaluations"])
+
+
+def test_server_without_forward_secrecy(lab: dict[str, int | str]) -> None:
+    rep = _scan(lab["rsa-only"], lab["ca"])
+    obs = rep["observation"]
+    tls = obs["facts"]["tls"]
+    assert obs["complete"], obs["incomplete"]
+    assert tls["suites"]["tls12"] == ["TLS_RSA_WITH_AES_128_GCM_SHA256"]
+    assert tls["forward_secrecy_supported"] is False
+    assert tls["groups"]["tls12"] == []  # known to be empty, not "unknown"
+    ietf = next(e for e in rep["evaluations"] if e["standard"]["id"] == "ietf-rfc9325")
+    failed = {f["rule_id"] for f in ietf["findings"] if f["status"] == "fail"}
+    assert failed == {"IETF-14"}  # MUST support forward secrecy
+    assert not [f for f in ietf["findings"] if f["status"] == "inconclusive"]
+    assert rep["rating"]["grade"] == "C"
 
 
 def test_closed_port_is_never_a_pass() -> None:
