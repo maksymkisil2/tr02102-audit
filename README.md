@@ -5,67 +5,105 @@
 ![Python 3.13](https://img.shields.io/badge/python-3.13-blue)
 ![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)
 
-**Audit a server's TLS configuration against six national and international standards side by side (BSI TR-02102-2, NIST SP 800-52r2, IETF RFC 9325, NCSC-NL, Mozilla), from the command line or a web interface. Every finding cites the section it comes from.**
+**Measure what a server's TLS configuration really accepts and compare it with BSI TR-02102-2, NIST SP 800-52r2, IETF RFC 9325, NCSC-NL and PCI DSS side by side. From a terminal, a CI pipeline or a hosted web interface with accounts and an audit log. Every finding cites the section it comes from.**
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/maksymkisil2/tr02102-audit)
 
-![Report for a deliberately weak server: verdicts per standard and the comparison matrix](docs/images/report.png)
+![Report for a typical modern website: rating A, yet two government standards say "does not conform"](docs/images/report.png)
 
 ## The problem
 
-[BSI TR-02102](https://www.bsi.bund.de/dok/TR-02102-en) is the German reference for which cryptographic mechanisms and key lengths to use, and under NIS2 it is the practical yardstick for the "state of the art" in Germany. Its tables change every year: the 2026-01 edition sets end dates for classical-only key agreement (end of 2031) and lists every cipher suite and group with a "use up to" year.
+[BSI TR-02102](https://www.bsi.bund.de/dok/TR-02102-en) is the German reference for which cryptographic mechanisms and key lengths to use, and under NIS2 it is the practical yardstick for the "state of the art" in Germany. NIST, the IETF, the Dutch NCSC and the payment card industry publish their own.
 
-General-purpose TLS scanners show what a server accepts, but comparing that output with the guideline is manual work, has to be repeated after every revision, and ends in a spreadsheet nobody can reproduce. Different standards (BSI, Mozilla, NIST) also disagree in places, and nothing shows where.
+General-purpose TLS scanners show what a server accepts. Comparing that with a guideline is manual work, has to be repeated after every revision, and ends in a spreadsheet nobody can reproduce. The standards also disagree with each other, and nothing shows where.
+
+There is a second problem: **"does not conform" is not the same as "insecure".** BSI TR-02102 and NIST SP 800-52 accept only the algorithms on their own approved lists. ChaCha20 and Curve25519, which most of the internet uses, are on neither list, so an ordinary well-run website fails both. A report that only says "fail" is useless to the person who has to act on it.
 
 ## What the tool does
 
-1. **Collects facts.** Hand-built TLS handshakes enumerate exactly which protocol versions, cipher suites and key-exchange groups the server accepts, plus the certificate, DH parameter size, Encrypt-then-MAC and extended master secret. No TLS library sits in between to hide anything.
-2. **Evaluates them against standards.** Each standard is a YAML file of rules. One scan is judged against all of them at once.
-3. **Shows where standards disagree.** The comparison matrix has one row per control and one column per standard.
+1. **Measures.** Hand-built TLS handshakes enumerate which protocol versions, cipher suites and key-exchange groups the server accepts, plus the certificate, DH parameter size, Encrypt-then-MAC, extended master secret, secure renegotiation and compression. No TLS library sits in between to hide anything.
+2. **Compares.** Each standard is a YAML file of rules. One measurement is judged against all of them. What a standard requires (MUST, shall) is a failure when missing; what it recommends (SHOULD) is a warning, exactly as the document words it.
+3. **Rates.** A grade from A+ to F says how good the configuration is by common practice, using only points on which the standards agree. It is the tool's own summary and is labelled as such.
+4. **Explains.** Every finding gives the reason, the evidence, the fix and the section of the standard. Failures that come only from an approved list are marked.
 
-| Standard | Region | Edition | Rules | Transcription |
+| Standard | Kind | Edition | Rules | Transcription |
 |---|---|---|---|---|
-| BSI TR-02102-2 (TLS) | Germany | 2026-01 | 16 | draft |
-| NIST SP 800-52 Rev. 2 | USA | 2019-08 | 16 | verified |
-| IETF RFC 9325 / BCP 195 | International | 2022-11 | 12 | verified |
-| NCSC-NL TLS Security Guidelines | Netherlands | 2025-05 | 14 | draft |
-| Mozilla Server Side TLS, Intermediate | International | 5.7 | 13 | draft |
-| Mozilla Server Side TLS, Modern | International | 5.7 | 9 | draft |
+| BSI TR-02102-2 (TLS) | Government, Germany | 2026-01 | 18 | draft |
+| NIST SP 800-52 Rev. 2 | Government, USA | 2019-08 | 18 | verified |
+| NCSC-NL TLS Security Guidelines | Government, Netherlands | 2025-05 | 15 | draft |
+| IETF RFC 9325 / BCP 195 | International | 2022-11 | 16 | verified |
+| PCI DSS v4.0.1, requirement 4.2.1 | International, payment cards | 2024-06 | 10 | verified |
+| Mozilla Server Side TLS, Intermediate and Modern | Community advice, optional | 5.7 | 13 and 9 | draft |
 
-The standards really do disagree, and the tool makes that visible:
+The three servers of the project's test lab show how the two answers differ:
 
-| Configuration | BSI | NIST | IETF | NCSC-NL | Mozilla Int. |
-|---|---|---|---|---|---|
-| RSA 2048-bit certificate | fail | pass | pass | warn | pass |
-| `TLS_CHACHA20_POLY1305_SHA256` | fail | fail (not FIPS) | — | pass | pass |
-| `x25519` key exchange | warn | warn | — | pass | pass |
-| Static ECDH key exchange | warn (until end of 2026) | pass | fail | fail | fail |
+| Server | Rating | BSI | NIST | IETF | NCSC-NL | PCI DSS |
+|---|---|---|---|---|---|---|
+| Deliberately weak (TLS 1.0 and 1.1, anonymous and static-RSA key exchange, no TLS 1.3) | F | fail | fail | fail | fail | fail |
+| Typical modern website (ECDHE, AES-GCM and ChaCha20, X25519, RSA 2048) | A | fail | fail, approved list only | conforms, 1 warning | conforms, 2 warnings | conforms, 2 warnings |
+| Hardened to the BSI lists (AES-GCM only, NIST curves, ECDSA certificate) | A | conforms, 1 warning | conforms | conforms | conforms, 1 warning | conforms, 1 warning |
 
-Adding a standard is adding a YAML file: see [docs/STANDARDS.md](docs/STANDARDS.md), which also lists the next candidates (BSI TR-03116-4, ANSSI, Canada ITSP.40.062, PCI DSS 4.0).
+The remaining warnings on the hardened server are the same one three times: no hybrid post-quantum key exchange yet. That is also what separates an A from an A+.
 
-> **Transcription status.** NIST SP 800-52r2 and RFC 9325 were transcribed from the published text. The other rule sets stay *draft* until each rule has been checked line by line against the official document; details in [docs/STANDARDS.md](docs/STANDARDS.md#current-standards). The tool produces technical evidence for an audit, not a compliance certificate.
+Adding a standard is adding a YAML file: see [docs/STANDARDS.md](docs/STANDARDS.md).
+
+> **Transcription status.** NIST SP 800-52r2, RFC 9325 and PCI DSS 4.2.1 were transcribed from the published text. The other rule sets stay *draft* until each rule has been checked line by line against the official document; details in [docs/STANDARDS.md](docs/STANDARDS.md#current-standards).
+
+### Certificates and regulations
+
+ISO/IEC 27001, PCI DSS or SOC 2 certificates are issued by accredited auditors after assessing a whole organisation. No scanner can award them. What an auditor asks for is evidence that encryption in transit follows a recognised technical standard, and a report from this tool is that evidence. The standards page of the web interface maps a report to the clauses that ask for it:
+
+| Framework | Clause |
+|---|---|
+| ISO/IEC 27001:2022 | Annex A 8.24, 8.20, 8.21, 5.14 |
+| PCI DSS v4.0.1 | Req. 4.2.1, 12.3.3 |
+| NIS2 Directive (EU) 2022/2555 | Art. 21(2)(h); Germany: § 30 (2) no. 8 BSIG |
+| DORA (EU) 2022/2554 | Art. 9; RTS (EU) 2024/1774 Art. 6, 7, 14 |
+| GDPR | Art. 32(1)(a) |
+| BSI C5:2020, BSI IT-Grundschutz, SOC 2, HIPAA, CIS Controls v8, NIST CSF 2.0 | see the standards page |
 
 ## Use it
 
-### Web interface (any device)
+### Web interface
 
-Click **Deploy to Render** above. Render asks for one value, `APP_PASSWORD`; everything else is preconfigured in [`render.yaml`](render.yaml) (free plan, Frankfurt region, Docker). After a few minutes the service is at `https://tr02102-audit-….onrender.com`.
+Click **Deploy to Render** above. Render asks for `APP_PASSWORD`, which becomes the password of the first administrator (login name `admin`). Everything else is preconfigured in [`render.yaml`](render.yaml): free plan, Frankfurt region, Docker.
 
-- Without signing in: start page, list of standards, and two sample reports.
-- After signing in: scan any public server; the report shows verdicts per standard, the comparison matrix, what the server accepts, and each finding with evidence, reference and fix. Reports can be downloaded as JSON.
+- **Without an account:** start page, the standards with all their rules, three sample reports.
+- **With an account:** check any public server; reports are kept, can be opened again, deleted, and downloaded as JSON or SARIF. "Print, save as PDF" gives a clean page for an audit file.
+- **Accounts and roles.** Registration is closed until an administrator opens it; until then the administrator creates accounts. Every account has a monthly limit of checks (default 50, adjustable per account) and an hourly limit of 30.
+- **Administration.** Who signed in, who failed to, who checked which address, with time, IP address, country and browser; activity per day; accounts can be limited, blocked or deleted.
+- **Languages.** English, German and Ukrainian. The choice follows the link in the header, then the account, then the browser.
 
-The free plan sleeps after inactivity, so the first request after a pause takes up to a minute.
+![Administration: activity per day and where requests came from (sample data)](docs/images/admin.png)
 
-<img src="docs/images/mobile.png" alt="The comparison matrix on a phone" width="300">
+<img src="docs/images/mobile.png" alt="A report on a phone, in German" width="300">
+
+**Keeping data.** Accounts, reports and the audit log live in a database. By default that is an SQLite file under `DATA_DIR`. A free Render service has no persistent disk, so the file is lost on every restart; the administration page says so. Set `DATABASE_URL` to a PostgreSQL database to keep the data. Note that Render's own free PostgreSQL [expires after 30 days](https://render.com/docs/free); any PostgreSQL provider with a permanent free tier works.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `APP_PASSWORD` | Password of the first administrator, created at start-up. Without it the site only shows the samples. | none |
+| `ADMIN_LOGIN` | Login name of that administrator | `admin` |
+| `ADMIN_RESET` | `1` sets the administrator's password to `APP_PASSWORD` again (lost password) | off |
+| `SECRET_KEY` | Signs the session cookie; a long random value | random per start |
+| `DATABASE_URL` | `postgresql://…` for PostgreSQL | SQLite file |
+| `DATA_DIR` | Directory of the SQLite file | `data` (`/data` in the image) |
+| `CHECKS_PER_MONTH` | Monthly limit of an account, unless an administrator sets another one | `50` |
+| `AUDIT_RETENTION_DAYS`, `REPORT_RETENTION_DAYS` | How long audit events and reports are kept | `30`, `365` |
+| `OPERATOR_NAME`, `OPERATOR_ADDRESS`, `OPERATOR_EMAIL` | Who runs the instance; shown in the imprint and the privacy notice | none |
+| `TRUST_PROXY`, `CLIENT_IP_HEADER` | Behind a reverse proxy: trust its headers, and which header carries the visitor's address. The image sets `TRUST_PROXY=1`; on Render the header is detected. | off |
+
+The legal pages (imprint, privacy, terms of use) describe what the software stores and does. Whoever runs a public instance has to review and complete them; they are not legal advice.
 
 ### Command line
 
 ```bash
 python -m pip install .
 
-tr02102-audit scan example.org                  # all standards, text report
+tr02102-audit scan example.org                  # the five formal standards, text report
 tr02102-audit scan example.org:8443 -s bsi-tr-02102-2 -f json -o report.json
-tr02102-audit evaluate report.json -s mozilla-modern   # re-judge a stored scan, no network
+tr02102-audit scan intranet.example --ca-file company-ca.pem    # internal PKI
+tr02102-audit evaluate report.json -s all        # re-judge a stored scan, no network
 tr02102-audit standards                          # list standards
 tr02102-audit serve                              # web interface on 127.0.0.1:8080
 ```
@@ -91,7 +129,7 @@ flowchart LR
     obs[("Observation<br/>facts only, JSON")]
     standards[("Standards<br/>YAML rules")]
     engine["Engine<br/>pure function"]
-    out(["Report<br/>web, text, JSON"])
+    out(["Report<br/>web, text, JSON, SARIF"])
 
     target <-->|"probes"| collectors
     collectors --> obs --> engine
@@ -100,26 +138,31 @@ flowchart LR
 
 - **Enumeration by elimination.** The prober offers all candidates, reads the server's choice from the cleartext ServerHello, removes it and repeats until the server refuses. For TLS 1.3 it sends an empty key share, so the server answers with a HelloRetryRequest that names its preferred group; no key exchange is needed.
 - **Facts are separate from judgment.** Stored observations can be re-evaluated against a new edition of a standard without touching the server again.
-- **Inconclusive is never "pass".** A timeout or reset is reported as unknown and fails the run.
+- **Unknown is never "pass".** Unanswered probes are repeated; after each enumeration a control probe checks that the server still answers. What stays unmeasured is reported as unknown, the report is marked incomplete, and no rating is given.
+- **Checked against an independent implementation.** A [validation workflow](.github/workflows/validation.yml) scans 18 public servers and compares every fact with what OpenSSL negotiates with the same server ([`validation/`](validation/)).
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Security of the tool itself
 
-A hosted scanner parses data from servers it does not control and could be misused to probe other people's networks. The [threat model](docs/THREAT_MODEL.md) covers 19 threats with STRIDE; the most important ones:
+A hosted scanner parses data from servers it does not control, holds accounts, and could be misused to probe other people's networks. The [threat model](docs/THREAT_MODEL.md) covers 26 threats with STRIDE; the most important ones:
 
 | Threat | Response |
 |---|---|
-| Server-side request forgery: probing cloud metadata or internal networks through the web service | Every resolved address must be public; the IP is pinned for all probes, so DNS rebinding has no effect |
-| Unauthorised scanning by strangers | Password login with rate limiting, an "I am authorised" confirmation per scan, 10 scans per hour |
-| Script injection through certificate fields | All target data is escaped; the site uses no JavaScript and sends `Content-Security-Policy: default-src 'none'` |
+| Server-side request forgery: probing cloud metadata or internal networks through the web service | Every resolved address must be public; the IP is pinned for all probes, so DNS rebinding has no effect. Refused targets are written to the audit log. |
+| Scanning by strangers | Accounts only, registration closed by default, an "I am authorised" confirmation per check, limits per hour and month, an audit log of who checked what from where |
+| Password guessing and stolen sessions | scrypt password hashes, the same answer and timing for unknown logins, 10 failed attempts per address and 100 per login name in 15 minutes, a new session at sign-in, all sessions end when the password changes |
+| One user reads another's reports | Reports belong to an account; a foreign report answers exactly like one that does not exist |
+| Script injection through certificate fields or logged text | All output is escaped; the site uses no JavaScript and sends `Content-Security-Policy: default-src 'none'` |
+| SQL injection | Bound parameters only; column names never come from a request |
 | Hostile server stalls or floods the scanner | Timeouts, connection and time budget per scan, size limits on every record and message |
 | A standard file is weakened or carries code | `yaml.safe_load`, strict schema validation, SHA-256 of each standard in every report, owner review via CODEOWNERS |
 
 ## Quality
 
-- 85 tests, including end-to-end scans of real OpenSSL servers and tests for SSRF, CSRF, login rate limiting and open redirects.
-- CI on every push: Ruff (with security rules), mypy in strict mode, pytest, SARIF output validated against the official schema, a Docker Compose lab whose servers are scanned by the CLI, and a container build that is started and probed.
+- 187 tests: end-to-end scans of real OpenSSL servers, hostile input for every parser, and the web interface (roles, CSRF, SSRF, limits, session handling, languages).
+- The storage and web tests run on SQLite and again on PostgreSQL in CI.
+- CI on every push: Ruff (with security rules), mypy in strict mode, pytest, SARIF output validated against the official schema, a Docker Compose lab whose servers are scanned by the CLI, and a container build that is started and signed in to.
 - Weekly dependency audit; GitHub Actions pinned to commit hashes; read-only workflow token; Dependabot.
 - The container runs as a non-root user.
 
@@ -130,13 +173,15 @@ python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\ac
 python -m pip install -r requirements.txt -e ".[dev]"
 ruff check . && ruff format --check . && mypy && pytest
 
-# web interface locally, without HTTPS
-APP_PASSWORD=dev SESSION_COOKIE_SECURE=0 tr02102-audit serve
+# web interface locally; sign in as "admin"
+APP_PASSWORD='a long passphrase' tr02102-audit serve
 
-# lab: a modern and a deliberately weak TLS server on localhost
+# lab: three TLS servers with known configurations on localhost
 docker compose -f lab/docker-compose.yml run --rm smoke
 tr02102-audit scan 127.0.0.1:8444
 ```
+
+Interface texts live in `src/tr02102_audit/web/locale/<language>.json`. A test fails when a text has no translation or a translation is no longer used.
 
 ## Roadmap
 
@@ -147,6 +192,7 @@ tr02102-audit scan 127.0.0.1:8444
 | M1.5 | Several standards side by side, web interface, container, hosting | Done |
 | M1.6 | International standards: NIST SP 800-52r2, IETF RFC 9325, NCSC-NL 2025-05 | Done |
 | M2 | SARIF output, CI integration, first release | Done |
+| M2.2 | Requirement levels, rating, PCI DSS, validation against OpenSSL; accounts, administration with audit log, three languages | Done |
 | M2.1 | Line-by-line verification of the BSI, NCSC-NL and Mozilla transcriptions | Next |
 | M3 | SSH prober, BSI TR-02102-4 | Planned |
 | M4 | strongSwan configuration parser, BSI TR-02102-3 | Planned |

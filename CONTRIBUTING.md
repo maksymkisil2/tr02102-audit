@@ -41,6 +41,15 @@ The format, the operators and the full procedure are in
 [docs/STANDARDS.md](docs/STANDARDS.md). Changes under
 `src/tr02102_audit/standards/` and `.github/` need a review by the code owner.
 
+## Interface texts and translations
+
+The web interface is in English, German and Ukrainian. The English text in a
+template or message is the key; translations are in
+`src/tr02102_audit/web/locale/<language>.json`. `tests/test_i18n.py` fails
+when a text has no translation, when a translation is no longer used, or when
+a placeholder such as `%(n)s` got lost. Rule texts are quoted from the
+standards and are not translated.
+
 ## Scope
 
 This is an audit tool: it reports what a server accepts and how that compares

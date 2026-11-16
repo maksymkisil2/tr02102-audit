@@ -13,7 +13,11 @@ This tool parses data sent by servers it does not control, and people act on its
 - a hostile server makes the tool crash, hang or execute code;
 - data from a server ends up unescaped in a report or in terminal output;
 - a weak configuration is reported as `pass`;
-- a secret from an analysed configuration file appears in any output.
+- a secret from an analysed configuration file appears in any output;
+- the hosted service can be made to probe a private address;
+- one account can read or change what belongs to another, or reach the
+  administration without the administrator role;
+- a session survives sign-out, a password change or the blocking of its account.
 
 ## Authorised use
 
