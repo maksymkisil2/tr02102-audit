@@ -1,5 +1,6 @@
 # Web service image. Build:  docker build -t tr02102-audit .
-#                    Run:    docker run -p 8080:8080 -e APP_PASSWORD=... -e SECRET_KEY=... tr02102-audit
+#                    Run:    docker run -p 8080:8080 -v tr02102-data:/data \
+#                              -e APP_PASSWORD=... -e SECRET_KEY=... tr02102-audit
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -7,7 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PORT=8080 \
-    TRUST_PROXY=1
+    TRUST_PROXY=1 \
+    DATA_DIR=/data
 
 WORKDIR /app
 
@@ -18,9 +20,13 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-deps . && rm -rf /app/src
 
-# Run as an unprivileged user (threat T-11).
-RUN useradd --system --uid 10001 --no-create-home app
+# Run as an unprivileged user (threat T-11). /data holds the SQLite file with
+# accounts, reports and the audit log; mount a volume there, or set
+# DATABASE_URL to use PostgreSQL instead.
+RUN useradd --system --uid 10001 --no-create-home app \
+    && mkdir /data && chown app /data
 USER app
+VOLUME /data
 
 EXPOSE 8080
 # One worker: jobs and rate limits are kept in process memory.

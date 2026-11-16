@@ -19,6 +19,10 @@ _HOSTNAME = re.compile(
 class TargetError(ValueError):
     """The target is malformed, cannot be resolved, or is not allowed."""
 
+    def __init__(self, message: str, reason: str = "invalid") -> None:
+        super().__init__(message)
+        self.reason = reason  # "invalid", "unresolved" or "private"
+
 
 @dataclass(frozen=True, slots=True)
 class ResolvedTarget:
@@ -83,17 +87,18 @@ def resolve(host: str, port: int, *, allow_private: bool) -> ResolvedTarget:
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except (socket.gaierror, UnicodeError) as exc:
-        raise TargetError(f"cannot resolve {host}") from exc
+        raise TargetError(f"cannot resolve {host}", "unresolved") from exc
 
     addresses = list(dict.fromkeys(str(info[4][0]) for info in infos))
     if not addresses:
-        raise TargetError(f"no address for {host}")
+        raise TargetError(f"no address for {host}", "unresolved")
     if not allow_private:
         blocked = [a for a in addresses if not is_public(a)]
         if blocked:
             raise TargetError(
                 "target resolves to a private, loopback or reserved address; "
-                "only public addresses can be scanned here"
+                "only public addresses can be scanned here",
+                "private",
             )
     ipv4 = [a for a in addresses if ":" not in a]
     chosen = ipv4[0] if ipv4 else addresses[0]

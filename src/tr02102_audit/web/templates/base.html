@@ -1,50 +1,67 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ lang }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light dark">
   {% block head %}{% endblock %}
-  <title>{% block title %}tr02102-audit{% endblock %}</title>
+  <title>{% block title %}{{ _('TLS audit against recognised standards') }}{% endblock %} · tr02102-audit</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23123b5f'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='%2374e0b5' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Ccircle cx='60' cy='60' r='55' fill='%23fff' stroke='%232b3a8c' stroke-width='9'/%3E%3Ccircle cx='60' cy='60' r='34' fill='%232b3a8c'/%3E%3Cpath d='M44 61l11 11 21-23' stroke='%23fff' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
-  <header class="topbar">
-    <div class="wrap topbar-inner">
-      <a class="brand" href="{{ url_for('index') }}">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span>tr02102<span class="brand-dim">-audit</span></span>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="{{ url_for('public.index') }}">
+        <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="54" fill="none" stroke="currentColor" stroke-width="8"/><circle cx="60" cy="60" r="34" fill="currentColor"/><path d="M44 61l11 11 21-23" stroke="var(--surface)" stroke-width="9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        tr02102-audit
       </a>
-      <nav class="nav">
-        <a href="{{ url_for('standards_page') }}">Standards</a>
-        {% if logged_in %}
-          <a href="{{ url_for('scan') }}">Scan</a>
-          <form method="post" action="{{ url_for('logout') }}" class="inline">
-            <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-            <button class="linklike" type="submit">Sign out</button>
-          </form>
-        {% elif scanning_enabled %}
-          <a class="btn btn-small" href="{{ url_for('login') }}">Sign in</a>
-        {% endif %}
+      <nav class="nav" aria-label="{{ _('Main') }}">
+        {% macro item(endpoint, label) %}<a href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint %} aria-current="page"{% endif %}>{{ label }}</a>{% endmacro %}
+        {% if user %}{{ item('account.scan', _('New check')) }}{{ item('account.reports', _('Reports')) }}{% endif %}
+        {{ item('public.standards_page', _('Standards')) }}
+        {% if is_admin %}{{ item('admin.overview', _('Administration')) }}{% endif %}
       </nav>
+      <div class="tools">
+        <ul class="langs" aria-label="{{ _('Language') }}">
+          {% for code, name in languages.items() %}
+            <li><a href="{{ lang_url(code) }}" hreflang="{{ code }}" title="{{ name }}"{% if code == lang %} aria-current="true"{% endif %}>{{ code|upper }}</a></li>
+          {% endfor %}
+        </ul>
+        {% if user %}
+          <a href="{{ url_for('account.account') }}">{{ user.login }}</a>
+          <form method="post" action="{{ url_for('public.logout') }}" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+            <button class="linkish" type="submit">{{ _('Sign out') }}</button>
+          </form>
+        {% elif can_sign_in %}
+          <a class="btn slim" href="{{ url_for('public.login') }}">{{ _('Sign in') }}</a>
+        {% endif %}
+      </div>
     </div>
   </header>
 
   <main class="wrap">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for category, message in messages %}
-        <div class="flash flash-{{ category }}" role="alert">{{ message }}</div>
+        <p class="flash {{ category }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ message }}</p>
       {% endfor %}
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="footer wrap">
-    <p>tr02102-audit {{ version }} · Apache-2.0 ·
-      <a href="https://github.com/maksymkisil2/tr02102-audit">Source on GitHub</a></p>
-    <p class="muted">For authorised use only: scan systems you own or are permitted to test.
-      Results are technical evidence, not a certificate of compliance.</p>
+  <footer class="foot">
+    <div class="wrap">
+      <ul>
+        <li><a href="{{ url_for('public.legal', page='imprint') }}">{{ _('Imprint') }}</a></li>
+        <li><a href="{{ url_for('public.legal', page='privacy') }}">{{ _('Privacy') }}</a></li>
+        <li><a href="{{ url_for('public.legal', page='terms') }}">{{ _('Terms of use') }}</a></li>
+        <li><a href="https://github.com/maksymkisil2/tr02102-audit" rel="noopener">{{ _('Source code') }}</a></li>
+      </ul>
+      <p>{{ _('For authorised use only: check servers you own or are permitted to test.') }}</p>
+      <p>{{ _('A report is technical evidence, not a certificate.') }} tr02102-audit {{ version }}, Apache-2.0.</p>
+    </div>
   </footer>
 </body>
 </html>

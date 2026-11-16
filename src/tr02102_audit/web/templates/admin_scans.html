@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_macros.html" import grade_chip, pager with context %}
+{% block title %}{{ _('Checks') }}{% endblock %}
+{% block content %}
+<h1>{{ _('Checks') }}</h1>
+{% include "_admin_nav.html" %}
+<section>
+  <div class="sheet scroll">
+    <table>
+      <thead><tr><th>{{ _('Time (UTC)') }}</th><th>{{ _('Who') }}</th><th>{{ _('Server') }}</th><th>{{ _('Rating') }}</th><th>{{ _('Result') }}</th></tr></thead>
+      <tbody>
+        {% for s in scans %}
+          <tr>
+            <td class="nowrap small">{{ s.created_at|when }}</td>
+            <td><a href="{{ url_for('admin.user_page', user_id=s.user_id) }}">{{ s.login or s.user_id }}</a></td>
+            <td><a class="code" href="{{ url_for('account.report_page', public_id=s.public_id) }}">{{ s.host }}:{{ s.port }}</a> <span class="quiet small code">{{ s.ip }}</span></td>
+            <td>{% if s.status == 'done' %}{{ grade_chip(s.grade) }}{% endif %}</td>
+            <td class="small">{% if s.status == 'error' %}<span class="tag bad">{{ s.error }}</span>{% else %}{{ _(s.status) }}{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="quiet">{{ _('Nothing recorded yet.') }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ pager(page, pages) }}
+</section>
+{% endblock %}

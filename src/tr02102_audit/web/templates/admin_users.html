@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_macros.html" import pager with context %}
+{% block title %}{{ _('Accounts') }}{% endblock %}
+{% block content %}
+<h1>{{ _('Accounts') }}</h1>
+{% include "_admin_nav.html" %}
+<section>
+  <div class="sheet scroll">
+    <table>
+      <thead><tr><th>{{ _('Login name') }}</th><th>{{ _('Role') }}</th><th class="num">{{ _('Checks per month') }}</th><th>{{ _('Created') }}</th><th>{{ _('Last sign-in') }}</th></tr></thead>
+      <tbody>
+        {% for u in users %}
+          <tr>
+            <td><a href="{{ url_for('admin.user_page', user_id=u.id) }}">{{ u.login }}</a>{% if u.blocked %} <span class="tag bad">{{ _('blocked') }}</span>{% endif %}</td>
+            <td>{{ _('administrator') if u.role == 'admin' else _('user') }}</td>
+            <td class="num">{% if u.role == 'admin' %}{{ _('no limit') }}{% elif u.monthly_limit is none %}{{ default_limit }}{% else %}{{ u.monthly_limit }}{% endif %}</td>
+            <td class="nowrap small">{{ u.created_at|when('%Y-%m-%d') }}</td>
+            <td class="nowrap small">{{ u.last_login_at|when or '–' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ pager(page, pages) }}
+</section>
+
+<section class="narrow">
+  <h2>{{ _('Create an account') }}</h2>
+  <form method="post" class="stack sheet">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <div><label for="login">{{ _('Login name or e-mail') }}</label>
+      <input id="login" name="login" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required></div>
+    <div><label for="password">{{ _('Password') }}</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="{{ min_password }}" required>
+      <p class="hint">{{ _('Pass it on over a safe channel. The owner can change it on the account page.') }}</p></div>
+    <label class="check"><input type="checkbox" name="role" value="admin"><span>{{ _('Administrator') }}</span></label>
+    <button class="btn" type="submit">{{ _('Create account') }}</button>
+  </form>
+</section>
+{% endblock %}

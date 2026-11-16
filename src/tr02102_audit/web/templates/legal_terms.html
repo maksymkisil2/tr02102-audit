@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Terms of use') }}{% endblock %}
+{% block content %}
+<section>
+  <h1>{{ _('Terms of use') }}</h1>
+  <p class="note caution small">{{ _('These are the rules of use built into the software. The operator has to review them for their own situation; this is not legal advice.') }}</p>
+  <ol>
+    <li><p><strong>{{ _('Authorised use only.') }}</strong> {{ _('You check only servers that you operate yourself or that you have permission to test. Before each check you confirm this.') }}</p></li>
+    <li><p><strong>{{ _('What a check does.') }}</strong> {{ _('It opens ordinary TLS connections and reads the server’s answers. It does not log in, send data or exploit anything.') }}</p></li>
+    <li><p><strong>{{ _('What a report is.') }}</strong> {{ _('A report is technical evidence about one address at one moment. It is not a certificate and does not replace an audit.') }}</p></li>
+    <li><p><strong>{{ _('Records.') }}</strong> {{ _('Who checked which address, and from where, is recorded to prevent abuse. Accounts that misuse the service are blocked.') }}</p></li>
+    <li><p><strong>{{ _('Availability.') }}</strong> {{ _('The service is provided as it is, without a guaranteed uptime.') }}</p></li>
+  </ol>
+</section>
+{% endblock %}

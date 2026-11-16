@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Administration') }}{% endblock %}
+{% block content %}
+<h1>{{ _('Administration') }}</h1>
+{% include "_admin_nav.html" %}
+
+{% if storage.volatile %}
+  <p class="note caution"><strong>{{ _('Data is not kept across restarts.') }}</strong> {{ _('This instance stores accounts, reports and the audit log in a file on a disk that the hosting provider erases on every restart. Set DATABASE_URL to a PostgreSQL database to keep them.') }}</p>
+{% endif %}
+
+<section>
+  <dl class="figures">
+    <div><dt>{{ _('Accounts') }}</dt><dd>{{ figures.users }}</dd></div>
+    <div><dt>{{ _('Checks today') }}</dt><dd>{{ figures.scans_today }}</dd></div>
+    <div><dt>{{ _('Checks, 30 days') }}</dt><dd>{{ figures.scans_30d }}</dd></div>
+    <div><dt>{{ _('Failed sign-ins, 24 hours') }}</dt><dd>{{ figures.failed_24h }}</dd></div>
+    <div><dt>{{ _('Refused targets, 7 days') }}</dt><dd>{{ figures.rejected_7d }}</dd></div>
+  </dl>
+</section>
+
+<section>
+  <h2>{{ _('Activity, last 14 days') }}</h2>
+  <ul class="legend">
+    <li><span class="s1"></span>{{ _('Checks started') }}</li>
+    <li><span class="s2"></span>{{ _('Failed sign-ins') }}</li>
+  </ul>
+  {% set box = activity.box %}
+  <svg class="chart" viewBox="0 0 {{ box.w }} {{ box.h }}" role="img" aria-label="{{ _('Checks started and failed sign-ins per day') }}">
+    {% for tick in activity.ticks %}
+      <line class="grid" x1="{{ box.left }}" x2="{{ box.w }}" y1="{{ tick.y }}" y2="{{ tick.y }}"/>
+      <text class="axis" x="{{ box.left - 8 }}" y="{{ tick.y + 4 }}" text-anchor="end">{{ tick.value }}</text>
+    {% endfor %}
+    {% for d in activity.series %}
+      <g class="day" tabindex="0" aria-label="{{ d.day|when('%Y-%m-%d') }}. {{ _('Checks started') }}: {{ d.scans }}. {{ _('Failed sign-ins') }}: {{ d.failures }}.">
+        <rect class="hit" x="{{ d.slot_x }}" y="{{ box.top - 8 }}" width="{{ d.slot_w }}" height="{{ box.bottom - box.top + 8 }}"/>
+        {% if d.scans_path %}<path class="s1" d="{{ d.scans_path }}"/>{% endif %}
+        {% if d.failures_path %}<path class="s2" d="{{ d.failures_path }}"/>{% endif %}
+        <text class="axis" x="{{ d.center }}" y="{{ box.bottom + 16 }}" text-anchor="middle">{{ d.day|when('%d') }}</text>
+        {% if loop.first or d.day|when('%d') == '01' %}<text class="axis" x="{{ d.center }}" y="{{ box.bottom + 28 }}" text-anchor="middle">{{ d.day|when('%b') }}</text>{% endif %}
+        <g class="tip">
+          <rect x="{{ d.tip_x }}" y="0" width="{{ box.tip_w }}" height="54" rx="4"/>
+          <text x="{{ d.tip_x + 9 }}" y="15">{{ d.day|when('%Y-%m-%d') }}</text>
+          <text x="{{ d.tip_x + 9 }}" y="31">{{ _('Checks started') }}: <tspan class="value">{{ d.scans }}</tspan></text>
+          <text x="{{ d.tip_x + 9 }}" y="47">{{ _('Failed sign-ins') }}: <tspan class="value">{{ d.failures }}</tspan></text>
+        </g>
+      </g>
+    {% endfor %}
+  </svg>
+  <details>
+    <summary class="small">{{ _('Show as a table') }}</summary>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>{{ _('Day') }}</th><th class="num">{{ _('Checks started') }}</th><th class="num">{{ _('Failed sign-ins') }}</th></tr></thead>
+        <tbody>{% for d in activity.series %}<tr><td>{{ d.day|when('%Y-%m-%d') }}</td><td class="num">{{ d.scans }}</td><td class="num">{{ d.failures }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+<section class="columns">
+  <div class="sheet">
+    <h3>{{ _('Where requests came from, 7 days') }}</h3>
+    {% if activity.countries %}
+      <table><tbody>{% for name, n in activity.countries %}<tr><td>{{ name }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table>
+    {% else %}
+      <p class="quiet small">{{ _('No country information yet. It appears when the hosting platform passes it on (Render does, through Cloudflare).') }}</p>
+    {% endif %}
+  </div>
+  <div class="sheet">
+    <h3>{{ _('Most active addresses, 7 days') }}</h3>
+    {% if activity.addresses %}
+      <table><tbody>{% for ip, n in activity.addresses %}<tr><td><a class="code" href="{{ url_for('admin.events', q=ip) }}">{{ ip }}</a></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table>
+    {% else %}
+      <p class="quiet small">{{ _('Nothing recorded yet.') }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<section>
+  <h2>{{ _('Latest events') }}</h2>
+  <div class="sheet scroll">
+    {% include "_events_table.html" %}
+  </div>
+  <p><a href="{{ url_for('admin.events') }}">{{ _('Open the full audit log') }}</a></p>
+</section>
+
+<section class="columns">
+  <div class="sheet">
+    <h3>{{ _('Registration') }}</h3>
+    <form method="post" action="{{ url_for('admin.settings') }}" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <label class="check">
+        <input type="checkbox" name="registration_open" value="yes"{% if registration_open %} checked{% endif %}>
+        <span>{{ _('Anyone may create an account') }}</span>
+      </label>
+      <p class="hint">{{ _('Closed: only accounts you create yourself can sign in. Open it once the legal pages are complete.') }}</p>
+      <div><button class="btn slim" type="submit">{{ _('Save') }}</button></div>
+    </form>
+  </div>
+  <div class="sheet">
+    <h3>{{ _('This instance') }}</h3>
+    <dl class="facts">
+      <dt>{{ _('Storage') }}</dt><dd>{{ storage.dialect }} <span class="quiet small code">{{ storage.location }}</span></dd>
+      <dt>{{ _('Audit log kept for') }}</dt><dd>{{ _('%(n)s days', n=retention_days) }}</dd>
+      <dt>{{ _('Reports kept for') }}</dt><dd>{{ _('%(n)s days', n=report_days) }}</dd>
+      <dt>{{ _('Visitor address from') }}</dt><dd>{{ ip_header or _('the TCP connection') }}</dd>
+      <dt>{{ _('Limit per account') }}</dt><dd>{{ _('%(month)s checks a month, %(hour)s an hour', month=monthly_limit, hour=hourly_limit) }}</dd>
+    </dl>
+  </div>
+</section>
+{% endblock %}

@@ -1,75 +1,84 @@
 {% extends "base.html" %}
+{% from "_macros.html" import seal, grade_chip, verdict, status %}
 {% set obs = r.observation %}
 {% set t = obs.target %}
 {% set tls = obs.facts.tls %}
 {% set cert = obs.facts.certificate %}
-{% macro badge(status) -%}
-  {%- if status is none -%}<span class="badge badge-none" title="Not covered by this standard">—</span>
-  {%- else -%}<span class="badge badge-{{ status }}">{{ {'pass':'Pass','fail':'Fail','warn':'Warn','inconclusive':'Unknown','not_applicable':'n/a'}[status] }}</span>
-  {%- endif -%}
-{%- endmacro %}
-{% set verdict_text = {'pass':'Conforms','pass_with_warnings':'Conforms with warnings','fail':'Does not conform','incomplete':'Incomplete'} %}
-{% block title %}{{ t.host }}:{{ t.port }} · tr02102-audit{% endblock %}
+{% set rate = r.rating %}
+{% block title %}{{ t.host }}:{{ t.port }}{% endblock %}
 {% block content %}
 
 {% if demo %}
-  <div class="note">Sample report: {{ demo_title }}. Recorded with this tool; evaluated live against the current rules.</div>
+  <p class="note">{{ _('Sample report, recorded in the project’s test lab and evaluated with the current rules.') }} {{ _(demo_title) }}.</p>
 {% endif %}
 
-<section class="report-head">
+<section class="sheet verdict-head">
+  {{ seal(rate.grade) }}
   <div>
-    <p class="eyebrow">TLS audit report</p>
-    <h1 class="mono break">{{ t.host }}:{{ t.port }}</h1>
-    <p class="muted small">
-      {{ t.ip }} · scanned {{ obs.collected_at|replace('T', ' ')|replace('+00:00', ' UTC') }} ·
-      {{ obs.connections }} connections · {{ obs.duration_s }} s · evaluated {{ r.evaluated_on }}
-    </p>
-  </div>
-  <div class="report-actions">
-    {% if demo %}
-      <a class="btn btn-ghost btn-small" href="{{ url_for('demo_json', name=demo) }}">JSON</a>
-      <a class="btn btn-ghost btn-small" href="{{ url_for('demo_sarif', name=demo) }}">SARIF</a>
-    {% elif job_id %}
-      <a class="btn btn-ghost btn-small" href="{{ url_for('job_json', job_id=job_id) }}">JSON</a>
-      <a class="btn btn-ghost btn-small" href="{{ url_for('job_sarif', job_id=job_id) }}">SARIF</a>
-      <a class="btn btn-small" href="{{ url_for('scan') }}">New scan</a>
+    <h1 class="code">{{ t.host }}:{{ t.port }}</h1>
+    <p class="quiet small">{{ t.ip }}, {{ _('checked') }} {{ obs.collected_at|replace('T', ' ')|replace('+00:00', ' UTC') }}, {{ _('%(n)s connections', n=obs.connections) }}, {{ _('evaluated') }} {{ r.evaluated_on }}</p>
+
+    {% if rate.grade is none %}
+      <p><strong>{{ _('Not rated.') }}</strong> {{ _('The check left something open, and an unknown is never counted as good. On what was measured the rating would be %(grade)s at best.', grade=rate.at_best) }}</p>
+    {% elif not rate.reasons %}
+      <p><strong>{{ _('No weakness found.') }}</strong>
+        {% if rate.bonus_missing %}{{ _('An A+ would also need:') }} {% for b in rate.bonus_missing %}{{ _(b.title) }}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %}</p>
+    {% else %}
+      <p><strong>{{ _('Why the rating is not better:') }}</strong></p>
     {% endif %}
+    {% if rate.reasons %}
+      <ul class="reasons">
+        {% for reason in rate.reasons %}
+          <li>{{ grade_chip(reason.grade) }}
+            <span>{{ _(reason.title) }}{% if reason.detail %} <span class="quiet">({{ reason.detail }})</span>{% endif %}</span></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% for item in rate.unknown %}
+      <p class="quiet small">{{ _('Could not be checked:') }} {{ _(item.title) }}</p>
+    {% endfor %}
+
+    <div class="actions">
+      {% if demo %}
+        <a class="btn plain slim" href="{{ url_for('public.demo_json', name=demo) }}">JSON</a>
+        <a class="btn plain slim" href="{{ url_for('public.demo_sarif', name=demo) }}">SARIF</a>
+      {% elif scan %}
+        <a class="btn plain slim" href="{{ url_for('account.report_json', public_id=scan.public_id) }}">JSON</a>
+        <a class="btn plain slim" href="{{ url_for('account.report_sarif', public_id=scan.public_id) }}">SARIF</a>
+        <a class="btn slim" href="{{ url_for('account.scan', target=t.host ~ ':' ~ t.port) }}">{{ _('Check again') }}</a>
+      {% endif %}
+    </div>
+    <p class="hint no-print">{{ _('To keep a PDF, print this page and choose “Save as PDF”.') }}</p>
   </div>
 </section>
 
 {% if not obs.complete or obs.notes %}
-  <div class="note">
-    {% if not obs.complete %}<strong>The scan did not complete.</strong> Missing values are reported as unknown, never as pass.<br>{% endif %}
-    {% for n in obs.notes %}{{ n }}<br>{% endfor %}
+  <div class="note caution">
+    {% if not obs.complete %}
+      <p><strong>{{ _('The check is incomplete.') }}</strong> {{ _('Anything that could not be measured is reported as unknown, never as met.') }}</p>
+      <ul>{% for reason in obs.incomplete %}<li>{{ reason }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% for n in obs.notes %}<p class="small">{{ n }}</p>{% endfor %}
   </div>
 {% endif %}
 
-<section class="verdicts">
-  {% for ev in r.evaluations %}
-    <div class="verdict verdict-{{ ev.verdict }}">
-      <p class="eyebrow">{{ ev.standard.short_name }} · {{ ev.standard.edition }}</p>
-      <p class="verdict-text">{{ verdict_text[ev.verdict] }}</p>
-      <p class="small">
-        <span class="count count-pass">{{ ev.counts.pass }} pass</span>
-        <span class="count count-fail">{{ ev.counts.fail }} fail</span>
-        <span class="count count-warn">{{ ev.counts.warn }} warn</span>
-        {% if ev.counts.inconclusive %}<span class="count">{{ ev.counts.inconclusive }} unknown</span>{% endif %}
-      </p>
-    </div>
-  {% endfor %}
-</section>
-
 <section>
-  <h2>Comparison</h2>
-  <p class="muted small">One row per control. "—" means the standard has no rule for it.</p>
-  <div class="table-scroll">
-    <table class="matrix">
-      <thead>
-        <tr><th>Control</th>{% for s in r.comparison.standards %}<th>{{ s }}</th>{% endfor %}</tr>
-      </thead>
+  <h2>{{ _('Conformance') }}</h2>
+  <p class="quiet">{{ _('The rating above is this tool’s own summary. The verdicts below follow each standard’s own wording: what it requires is a failure when missing, what it recommends is a warning.') }}</p>
+  <div class="sheet scroll">
+    <table>
+      <thead><tr><th>{{ _('Standard') }}</th><th>{{ _('Verdict') }}</th><th>{{ _('Requirements not met') }}</th><th>{{ _('Warnings') }}</th></tr></thead>
       <tbody>
-        {% for row in r.comparison.rows %}
-          <tr><td>{{ row.label }}</td>{% for c in row.cells %}<td>{{ badge(c) }}</td>{% endfor %}</tr>
+        {% for ev in r.evaluations %}
+          <tr>
+            <td><a href="#{{ ev.standard.id }}"><strong>{{ ev.standard.short_name }}</strong></a>
+              <span class="quiet small nowrap">{{ ev.standard.edition }}</span><br>
+              <span class="quiet small">{{ ev.standard.region }}</span></td>
+            <td>{{ verdict(ev.verdict) }}
+              {% if ev.off_list_only %}<br><span class="small quiet">{{ _('Only because of its approved list; no weak algorithm found.') }}</span>{% endif %}</td>
+            <td class="num">{{ ev.counts.fail }}</td>
+            <td class="num">{{ ev.counts.warn }}{% if ev.counts.inconclusive %} <span class="quiet">+ {{ ev.counts.inconclusive }} {{ _('unknown') }}</span>{% endif %}</td>
+          </tr>
         {% endfor %}
       </tbody>
     </table>
@@ -77,61 +86,75 @@
 </section>
 
 <section>
-  <h2>What the server accepts</h2>
-  <div class="grid2">
-    <div class="card">
-      <h3>Protocol versions</h3>
-      <div class="chips">
-        {% for v, state in tls.version_probes.items() %}
-          <span class="chip chip-{{ state }} {% if state == 'accepted' and v in ['SSL3.0','TLS1.0','TLS1.1'] %}chip-bad{% endif %}">{{ v }} <small>{{ state }}</small></span>
+  <h2>{{ _('Control by control') }}</h2>
+  <p class="quiet">{{ _('One row per topic. A dot means the standard has no rule for it.') }}</p>
+  <div class="sheet scroll">
+    <table class="matrix">
+      <thead><tr><th>{{ _('Topic') }}</th>{% for s in r.comparison.standards %}<th>{{ s }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in r.comparison.rows %}
+          <tr><td>{{ _(row.label) }}</td>{% for c in row.cells %}<td>{{ status(c, bare=true) }}</td>{% endfor %}</tr>
         {% endfor %}
-      </div>
+      </tbody>
+    </table>
+  </div>
+</section>
 
-      <h3>Key-exchange groups</h3>
-      {% for key, label in [('tls13','TLS 1.3'), ('tls12','TLS 1.2')] %}
-        {% if tls.groups[key] %}
-          <p class="small"><strong>{{ label }}:</strong>
-            {% for g in tls.groups[key] %}<span class="mono tag">{{ g }}</span>{% endfor %}</p>
-        {% endif %}
-      {% endfor %}
-      {% if tls.dhe_prime_bits %}<p class="small"><strong>DHE prime:</strong> {{ tls.dhe_prime_bits }} bit</p>{% endif %}
-      {% if tls.extended_master_secret is not none %}
-        <p class="small"><strong>Extended master secret:</strong> {{ 'yes' if tls.extended_master_secret else 'no' }}</p>
-      {% endif %}
+<section>
+  <h2>{{ _('What the server accepts') }}</h2>
+  <div class="columns">
+    <div class="sheet">
+      <h3>{{ _('Protocol versions') }}</h3>
+      <ul class="chips">
+        {% for v, state in tls.version_probes.items() %}
+          {% set legacy = v in ['SSL3.0', 'TLS1.0', 'TLS1.1'] %}
+          <li><span class="tag {{ 'bad' if state == 'accepted' and legacy else 'good' if state == 'accepted' else 'warn' if state == 'inconclusive' else '' }}">{{ v }}: {{ _(state) }}</span></li>
+        {% endfor %}
+      </ul>
+      <h3>{{ _('Key exchange') }}</h3>
+      <dl class="facts">
+        {% for key, label in [('tls13', 'TLS 1.3'), ('tls12', 'TLS 1.2')] %}
+          {% if tls.groups[key] %}<dt>{{ _('Groups') }}, {{ label }}</dt><dd class="code">{{ tls.groups[key]|join(', ') }}</dd>{% endif %}
+        {% endfor %}
+        {% if tls.dhe_prime_bits %}<dt>{{ _('DH parameters') }}</dt><dd>{{ tls.dhe_prime_bits }} bit</dd>{% endif %}
+        {% for key, label in [('extended_master_secret', 'Extended master secret'), ('secure_renegotiation', 'Secure renegotiation')] %}
+          {% if tls[key] is defined and tls[key] is not none %}<dt>{{ _(label) }}</dt><dd>{{ _('yes') if tls[key] else _('no') }}</dd>{% endif %}
+        {% endfor %}
+        {% if tls.compression is defined and tls.compression is not none %}<dt>{{ _('TLS compression') }}</dt><dd>{{ _('on') if tls.compression else _('off') }}</dd>{% endif %}
+      </dl>
     </div>
 
-    <div class="card">
-      <h3>Certificate</h3>
+    <div class="sheet">
+      <h3>{{ _('Certificate') }}</h3>
       {% if cert %}
         <dl class="facts">
-          <dt>Subject</dt><dd class="break">{{ cert.subject_cn or '—' }}</dd>
-          <dt>Issuer</dt><dd class="break">{{ cert.issuer_cn or '—' }}{% if cert.self_signed %} <span class="tag tag-bad">self-signed</span>{% endif %}</dd>
-          <dt>Key</dt><dd>{{ cert.key_type }} {{ cert.key_bits }} bit{% if cert.curve %} ({{ cert.curve }}){% endif %}</dd>
-          <dt>Signature</dt><dd>{{ cert.signature_algorithm }}</dd>
-          <dt>Valid</dt><dd>{{ cert.not_before[:10] }} → {{ cert.not_after[:10] }} ({{ cert.lifetime_days }} days)</dd>
-          <dt>Trust</dt><dd>{% if cert.trusted %}verified{% elif cert.trusted is none %}unknown{% else %}<span class="tag tag-bad">not trusted</span> {{ cert.trust_error }}{% endif %}</dd>
-          {% if cert.san %}<dt>Names</dt><dd class="break small">{{ cert.san|join(', ') }}</dd>{% endif %}
+          <dt>{{ _('Issued to') }}</dt><dd>{{ cert.subject_cn or '–' }}</dd>
+          <dt>{{ _('Issued by') }}</dt><dd>{{ cert.issuer_cn or '–' }}{% if cert.self_signed %} <span class="tag bad">{{ _('self-signed') }}</span>{% endif %}</dd>
+          <dt>{{ _('Key') }}</dt><dd>{{ cert.key_type }} {{ cert.key_bits }} bit{% if cert.curve %} ({{ cert.curve }}){% endif %}</dd>
+          <dt>{{ _('Signature') }}</dt><dd>{{ cert.signature_algorithm }}</dd>
+          <dt>{{ _('Valid') }}</dt><dd>{{ cert.not_before[:10] }} {{ _('to') }} {{ cert.not_after[:10] }} ({{ _('%(n)s days', n=cert.lifetime_days) }})</dd>
+          <dt>{{ _('Trust') }}</dt><dd>{% if cert.trusted %}<span class="tag good">{{ _('verified') }}</span>{% elif cert.trusted is none %}<span class="tag">{{ _('unknown') }}</span>{% else %}<span class="tag bad">{{ _('not trusted') }}</span> {{ cert.trust_error }}{% endif %}</dd>
+          {% if cert.san %}<dt>{{ _('Names') }}</dt><dd class="small">{{ cert.san[:12]|join(', ') }}{% if cert.san|length > 12 %} …{% endif %}</dd>{% endif %}
         </dl>
       {% else %}
-        <p class="muted">No certificate was retrieved.</p>
+        <p class="quiet">{{ _('No certificate could be retrieved.') }}</p>
       {% endif %}
     </div>
   </div>
 
-  {% for key, label in [('tls13','TLS 1.3'), ('tls12','TLS 1.2'), ('tls11','TLS 1.1'), ('tls10','TLS 1.0'), ('ssl3','SSL 3.0')] %}
+  {% for key, label in [('tls13', 'TLS 1.3'), ('tls12', 'TLS 1.2'), ('tls11', 'TLS 1.1'), ('tls10', 'TLS 1.0'), ('ssl3', 'SSL 3.0')] %}
     {% if tls.suites[key] %}
-      <details class="card" {% if loop.first %}open{% endif %}>
-        <summary><strong>{{ label }} cipher suites</strong> <span class="muted">({{ tls.suites[key]|length }}, in the server's order of choice)</span></summary>
+      <details class="sheet"{% if loop.first %} open{% endif %}>
+        <summary>{{ _('Cipher suites') }}, {{ label }} <span class="quiet small">({{ tls.suites[key]|length }}, {{ _('in the server’s order of choice') }})</span></summary>
         <ul class="suites">
           {% for name in tls.suites[key] %}
             {% set i = suite_info(name) %}
-            <li>
-              <span class="mono break">{{ name }}</span>
-              {% if i.broken %}<span class="tag tag-bad">broken</span>{% endif %}
-              {% if not i.forward_secrecy %}<span class="tag tag-bad">no PFS</span>{% endif %}
-              {% if i.cbc %}<span class="tag tag-warn">CBC</span>{% endif %}
-              {% if i.aead %}<span class="tag tag-good">AEAD</span>{% endif %}
-            </li>
+            <li><span class="code">{{ name }}</span>
+              {% if i.broken %}<span class="tag bad">{{ _('broken') }}</span>{% endif %}
+              {% if i.triple_des %}<span class="tag bad">3DES</span>{% endif %}
+              {% if not i.forward_secrecy %}<span class="tag bad">{{ _('no forward secrecy') }}</span>{% endif %}
+              {% if i.cbc %}<span class="tag warn">CBC</span>{% endif %}
+              {% if i.aead %}<span class="tag good">AEAD</span>{% endif %}</li>
           {% endfor %}
         </ul>
       </details>
@@ -140,46 +163,61 @@
 </section>
 
 <section>
-  <h2>Findings</h2>
+  <h2>{{ _('Findings') }}</h2>
+  {% if lang != 'en' %}<p class="quiet small">{{ _('Rule texts and references are quoted from the standards and stay in English.') }}</p>{% endif %}
   {% for ev in r.evaluations %}
     {% set problems = ev.findings|selectattr('status', 'in', ['fail', 'warn', 'inconclusive'])|list %}
-    <details class="card" {% if problems %}open{% endif %}>
-      <summary>
-        <strong>{{ ev.standard.title }}</strong>
-        <span class="muted">({{ problems|length }} to review)</span>
-      </summary>
+    <details class="sheet" id="{{ ev.standard.id }}"{% if problems %} open{% endif %}>
+      <summary>{{ ev.standard.title }} <span class="quiet small">({{ _('%(n)s to review', n=problems|length) }})</span></summary>
       {% if ev.standard.transcription == 'draft' %}
-        <p class="note small">Draft transcription of {{ ev.standard.short_name }}: rules still need a line-by-line review against the official document.</p>
+        <p class="note caution small">{{ _('Draft transcription: these rules still await a line-by-line review against the official document.') }}</p>
       {% endif %}
-      <ul class="findings">
-        {% for f in ev.findings|by_status if f.status != 'not_applicable' %}
-          <li class="finding finding-{{ f.status }}">
-            <div class="finding-head">
-              {{ badge(f.status) }}
-              <span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
-              <span class="mono small muted">{{ f.rule_id }}</span>
-              <strong>{{ f.title }}</strong>
-            </div>
-            {% if f.status != 'pass' %}
-              <p class="small">{{ f.message }}</p>
-              {% if f.evidence %}
-                <ul class="evidence">{% for e in f.evidence[:12] %}<li class="mono break">{{ e }}</li>{% endfor %}
-                  {% if f.evidence|length > 12 %}<li class="muted">… and {{ f.evidence|length - 12 }} more</li>{% endif %}
-                </ul>
-              {% endif %}
-              {% if f.remediation %}<p class="small"><strong>Fix:</strong> {{ f.remediation }}</p>{% endif %}
+      {% macro finding(f) %}
+        <li class="finding">
+          <div class="finding-head">
+            {{ status(f.status) }}
+            <strong>{{ f.title }}</strong>
+            <span class="code quiet small">{{ f.rule_id }}</span>
+            <span class="tag">{{ _('required') if f.level == 'required' else _('recommended') }}</span>
+            {% if f.off_list_only %}<span class="tag warn">{{ _('approved list only') }}</span>{% endif %}
+          </div>
+          {% if f.status != 'pass' %}
+            <p>{{ f.message }}</p>
+            {% if f.off_list_only %}<p class="small quiet">{{ _('These values are considered sound by other standards. This one only accepts what is on its own list.') }}</p>{% endif %}
+            {% if f.evidence %}
+              <ul class="evidence">{% for e in f.evidence[:12] %}<li class="code">{{ e }}</li>{% endfor %}
+                {% if f.evidence|length > 12 %}<li class="quiet">{{ _('and %(n)s more', n=f.evidence|length - 12) }}</li>{% endif %}
+              </ul>
             {% endif %}
-            <p class="small muted">Reference: {{ f.reference }}</p>
-          </li>
-        {% endfor %}
-      </ul>
+            {% if f.remediation %}<p><strong>{{ _('Fix:') }}</strong> {{ f.remediation }}</p>{% endif %}
+          {% endif %}
+          <p class="small quiet">{{ f.reference }}</p>
+        </li>
+      {% endmacro %}
+      {% if problems %}
+        <ul class="findings">{% for f in problems|by_status %}{{ finding(f) }}{% endfor %}</ul>
+      {% else %}
+        <p>{{ _('Every requirement and recommendation of this standard is met.') }}</p>
+      {% endif %}
+      {% set met = ev.findings|selectattr('status', 'equalto', 'pass')|list %}
+      {% if met %}
+        <details class="met">
+          <summary>{{ _('%(n)s requirements met', n=met|length) }}</summary>
+          <ul class="findings">{% for f in met %}{{ finding(f) }}{% endfor %}</ul>
+        </details>
+      {% endif %}
     </details>
   {% endfor %}
 </section>
 
-<section class="muted small">
-  <p>Observation digest (SHA-256): <span class="mono break">{{ r.observation_sha256 }}</span></p>
-  <p>Black-box scan: it shows what this endpoint accepted at the time of the scan. Servers behind a
-    load balancer may differ.</p>
+<section class="quiet small">
+  <p>{{ _('Fingerprint of the measurement (SHA-256):') }} <span class="code">{{ r.observation_sha256 }}</span></p>
+  <p>{{ _('This is a view from outside: it shows what this address accepted at the time of the check. Servers behind a load balancer may differ from one another.') }}</p>
+  {% if scan %}
+    <form method="post" action="{{ url_for('account.report_delete', public_id=scan.public_id) }}" class="no-print">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <button class="linkish" type="submit">{{ _('Delete this report') }}</button>
+    </form>
+  {% endif %}
 </section>
 {% endblock %}

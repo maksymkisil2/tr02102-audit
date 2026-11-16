@@ -54,6 +54,42 @@ jobs:
         env:
           SARIF_SCHEMA: sarif-schema-2.1.0.json
 
+  # The web interface stores accounts, reports and the audit log in SQLite by
+  # default and in PostgreSQL when hosted. The same tests run on both.
+  postgres:
+    name: Web tests on PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: tr02102
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install the project with development tools
+        run: python -m pip install -r requirements.txt -e ".[dev]"
+
+      - name: Run the storage and web tests against PostgreSQL
+        run: pytest tests/test_store.py tests/test_web.py
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:ci-only@127.0.0.1:5432/tr02102
+
   lab:
     name: Lab smoke test and scan
     runs-on: ubuntu-24.04
@@ -145,10 +181,26 @@ jobs:
 
       - name: Start and probe the web service
         run: |
-          docker run -d --name web -p 8080:8080 -e SECRET_KEY=ci -e APP_PASSWORD=ci tr02102-audit:ci
+          docker run -d --name web -p 8080:8080 \
+            -e SECRET_KEY=ci -e APP_PASSWORD=ci-only-passphrase -e SESSION_COOKIE_SECURE=0 \
+            tr02102-audit:ci
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
           curl -fsS http://127.0.0.1:8080/demo/tls-weak | grep -q "Does not conform"
+          curl -fsS "http://127.0.0.1:8080/login?lang=de" | grep -q "Anmelden"
           docker exec web id -u | grep -qv '^0$'   # must not run as root
+          docker exec web test -s /data/tr02102-audit.db   # the database file is writable
+
+      # Sign in as the administrator created from APP_PASSWORD and open the
+      # administration, so the image is known to work end to end.
+      - name: Sign in to the running container
+        run: |
+          jar=$(mktemp)
+          token=$(curl -fsS -c "$jar" http://127.0.0.1:8080/login \
+            | grep -o 'name="csrf" value="[^"]*"' | head -1 | cut -d'"' -f4)
+          curl -fsS -b "$jar" -c "$jar" -o /dev/null \
+            --data-urlencode "csrf=$token" --data-urlencode "login=admin" \
+            --data-urlencode "password=ci-only-passphrase" http://127.0.0.1:8080/login
+          curl -fsS -b "$jar" http://127.0.0.1:8080/admin | grep -q "Audit log"
 
       - name: Show logs
         if: always()

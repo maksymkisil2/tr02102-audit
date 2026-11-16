@@ -9,6 +9,7 @@ tr02102-audit serve                       # web interface
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -150,7 +151,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "serve":
         from tr02102_audit.web import create_app
 
-        create_app().run(host=args.host, port=args.port)
+        # The built-in server speaks plain HTTP and is meant for the local
+        # machine. A cookie marked "Secure" would never come back over HTTP,
+        # so nobody could sign in. Production runs under gunicorn behind TLS.
+        local = {} if "SESSION_COOKIE_SECURE" in os.environ else {"SESSION_COOKIE_SECURE": False}
+        create_app(local).run(host=args.host, port=args.port)
         return ExitCode.OK
 
     # No command: nothing was audited, so the run must not look like a success.

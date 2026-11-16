@@ -12,6 +12,11 @@ updates:
       interval: weekly
 
   - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
     directory: /lab
     schedule:
       interval: weekly

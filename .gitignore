@@ -20,6 +20,12 @@ reports/
 *.sarif
 sarif-schema-2.1.0.json
 
+# Local database of the web interface: accounts, reports, audit log
+/data/
+*.db
+*.db-wal
+*.db-shm
+
 # Key material must never be committed
 *.key
 *.pem

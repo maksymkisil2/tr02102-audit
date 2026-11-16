@@ -1,0 +1,5 @@
+<ul class="subnav">
+  {% for endpoint, label in [('admin.overview', 'Overview'), ('admin.events', 'Audit log'), ('admin.scans', 'Checks'), ('admin.users', 'Accounts')] %}
+    <li><a href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint or (endpoint == 'admin.users' and request.endpoint == 'admin.user_page') %} aria-current="page"{% endif %}>{{ _(label) }}</a></li>
+  {% endfor %}
+</ul>

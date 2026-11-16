@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_macros.html" import grade_chip, pager with context %}
+{% block title %}{{ _('Reports') }}{% endblock %}
+{% block content %}
+<section>
+  <h1>{{ _('Reports') }}</h1>
+  <p class="quiet">
+    {% if allowance.unlimited %}{{ _('Administrator: no monthly limit.') }}
+    {% else %}{{ _('%(left)s of %(included)s checks left this month.', left=allowance.left, included=allowance.included) }}
+    {% endif %}
+    {{ _('Reports are kept for %(n)s days.', n=report_days) }}
+  </p>
+  <p><a class="btn" href="{{ url_for('account.scan') }}">{{ _('New check') }}</a></p>
+
+  {% if scans %}
+    <div class="sheet scroll">
+      <table>
+        <thead><tr><th>{{ _('Rating') }}</th><th>{{ _('Server') }}</th><th>{{ _('Checked') }}</th><th>{{ _('Standards met') }}</th></tr></thead>
+        <tbody>
+          {% for s in scans %}
+            {% set met = s.verdicts.values()|select('in', ['pass', 'pass_with_warnings'])|list|length %}
+            <tr>
+              <td>{% if s.status == 'done' %}{{ grade_chip(s.grade) }}{% else %}<span class="tag {{ 'bad' if s.status == 'error' else '' }}">{{ _(s.status) }}</span>{% endif %}</td>
+              <td><a class="code" href="{{ url_for('account.report_page', public_id=s.public_id) }}">{{ s.host }}:{{ s.port }}</a></td>
+              <td class="nowrap">{{ s.created_at|when }} UTC</td>
+              <td>{% if s.status == 'done' %}{{ _('%(met)s of %(all)s', met=met, all=s.verdicts|length) }}{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {{ pager(page, pages) }}
+  {% else %}
+    <p class="note">{{ _('No reports yet. Your first check takes less than a minute.') }}</p>
+  {% endif %}
+</section>
+{% endblock %}

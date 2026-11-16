@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Privacy') }}{% endblock %}
+{% block content %}
+<section>
+  <h1>{{ _('Privacy') }}</h1>
+  <p class="note caution small">{{ _('This page describes what the software stores. The operator has to review it and complete it for their own situation; it is not legal advice.') }}</p>
+
+  <h2>{{ _('Who is responsible') }}</h2>
+  <p>{% if operator.name %}{{ operator.name }}, {{ operator.address }}, {{ operator.email }}{% else %}{{ _('See the imprint.') }}{% endif %}</p>
+
+  <h2>{{ _('What is stored, and why') }}</h2>
+  <div class="sheet scroll">
+    <table>
+      <thead><tr><th>{{ _('Data') }}</th><th>{{ _('Purpose') }}</th><th>{{ _('Kept for') }}</th></tr></thead>
+      <tbody>
+        <tr><td>{{ _('Login name (e-mail address) and a salted hash of the password') }}</td><td>{{ _('Your account') }}</td><td>{{ _('Until you delete the account') }}</td></tr>
+        <tr><td>{{ _('Checked server addresses and the measured results') }}</td><td>{{ _('Your reports') }}</td><td>{{ _('%(n)s days, or until you delete them', n=report_days) }}</td></tr>
+        <tr><td>{{ _('Audit log: sign-ins, failed sign-ins, checks, with time, IP address, country and browser') }}</td><td>{{ _('Security of the service and prevention of abuse (legitimate interest, Art. 6(1)(f) GDPR)') }}</td><td>{{ _('%(n)s days', n=retention_days) }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>{{ _('Cookies') }}</h2>
+  <p>{{ _('One cookie keeps you signed in and remembers your language. It is technically necessary. There is no tracking, no analytics and no content from other sites.') }}</p>
+
+  <h2>{{ _('Your rights') }}</h2>
+  <p>{{ _('You can ask for access, correction and deletion of your data, and you can complain to a data protection authority. You can delete your account and all its reports yourself on the account page.') }}</p>
+</section>
+{% endblock %}

@@ -1,55 +1,41 @@
-"""Web interface: password-protected scanning, public demo reports.
+"""Web interface: accounts, scanning, reports, administration.
 
 Configuration (environment variables):
 
-    APP_PASSWORD            required to enable scanning; without it the site is demo-only
     SECRET_KEY              signs session cookies; set a long random value in production
+    APP_PASSWORD            password of the first administrator, created at start-up
+    ADMIN_LOGIN             login name of that administrator (default: admin)
+    ADMIN_RESET             "1" sets the administrator's password to APP_PASSWORD again
+    DATABASE_URL            postgres://... for PostgreSQL; unset for a SQLite file
+    DATA_DIR                directory of the SQLite file (default: ./data)
     SESSION_COOKIE_SECURE   "1" (default) sends cookies over HTTPS only; "0" for local HTTP
     TRUST_PROXY             "1" when running behind one reverse proxy (Render, nginx)
+    CLIENT_IP_HEADER        header with the visitor's address (Render: CF-Connecting-IP)
+    AUDIT_RETENTION_DAYS    how long audit events are kept (default: 30)
+    REPORT_RETENTION_DAYS   how long reports are kept (default: 365)
+    CHECKS_PER_MONTH        monthly limit of an account unless an administrator
+                            sets another one for it (default: 50)
+    OPERATOR_NAME, OPERATOR_ADDRESS, OPERATOR_EMAIL
+                            who runs this instance; shown on the legal pages
 """
 
-import hashlib
-import hmac
 import json
 import os
 import secrets
-import threading
-import time
-from collections import defaultdict, deque
-from collections.abc import Callable
-from datetime import timedelta
-from functools import wraps
-from importlib import resources
-from typing import Any, ParamSpec, TypeVar
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
-from flask import (
-    Flask,
-    Response,
-    abort,
-    flash,
-    redirect,
-    render_template,
-    request,
-    session,
-    url_for,
-)
+from flask import Flask, Response, g, render_template, request, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from tr02102_audit import __version__, report, sarif
+from tr02102_audit import __version__
 from tr02102_audit.engine import STATUS_RANK
-from tr02102_audit.netguard import TargetError, parse_target, resolve
-from tr02102_audit.standards import CONTROLS, defaults, load_builtin
+from tr02102_audit.standards import CATEGORIES, CONTROLS, load_builtin
 from tr02102_audit.tls.registry import suite_info
-from tr02102_audit.web.jobs import JobStore
-
-P = ParamSpec("P")
-R = TypeVar("R")
-
-DEMOS = {
-    "tls-weak": "Deliberately weak server from the test lab",
-    "tls-typical": "Typical modern website from the test lab",
-    "tls-good": "Server hardened to the BSI lists, from the test lab",
-}
+from tr02102_audit.web import common, i18n, quota, security
+from tr02102_audit.web.jobs import JobRunner
+from tr02102_audit.web.store import Database, Store, StoreError
 
 CSP = (
     "default-src 'none'; style-src 'self'; img-src 'self' data:; "
@@ -57,122 +43,171 @@ CSP = (
 )
 
 
-class RateLimiter:
-    """Sliding-window counter per key. In memory: one process, one instance."""
-
-    def __init__(self, limit: int, window_s: float) -> None:
-        self.limit = limit
-        self.window = window_s
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = threading.Lock()
-
-    def allow(self, key: str) -> bool:
-        now = time.monotonic()
-        with self._lock:
-            hits = self._hits[key]
-            while hits and now - hits[0] > self.window:
-                hits.popleft()
-            if len(hits) >= self.limit:
-                return False
-            hits.append(now)
-            return True
-
-
 def _env_flag(name: str, default: bool) -> bool:
     value = os.environ.get(name)
     return default if value is None else value.strip().lower() in ("1", "true", "yes")
 
 
-def _load_demo(name: str) -> dict[str, Any]:
-    text = resources.files("tr02102_audit.web").joinpath("demo", f"{name}.json").read_text("utf-8")
-    data: dict[str, Any] = json.loads(text)
-    return data
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, "")))
+    except ValueError:
+        return default
+
+
+def _client_ip_header() -> str:
+    explicit = os.environ.get("CLIENT_IP_HEADER", "").strip()
+    if explicit:
+        return explicit
+    # Render puts Cloudflare in front of every service. The address in
+    # X-Forwarded-For is Cloudflare's; the visitor's is in this header.
+    return "CF-Connecting-IP" if os.environ.get("RENDER") else ""
+
+
+def _bootstrap_admin(app: Flask, store: Store) -> None:
+    """Create the first administrator from APP_PASSWORD, so a new instance is usable."""
+    password = app.config["APP_PASSWORD"]
+    login = app.config["ADMIN_LOGIN"]
+    if not password:
+        return
+    if len(password) < security.MIN_PASSWORD:
+        app.logger.warning(
+            "APP_PASSWORD is shorter than %d characters; choose a longer one.",
+            security.MIN_PASSWORD,
+        )
+    existing = store.user_by_login(login)
+    cost = app.config["SCRYPT_N_LOG2"]
+    if existing is None:
+        store.create_user(login, security.hash_password(password, cost), role="admin")
+    elif app.config["ADMIN_RESET"]:
+        store.update_user(
+            existing["id"], password_hash=security.hash_password(password, cost), role="admin"
+        )
 
 
 def create_app(config: dict[str, Any] | None = None) -> Flask:
     app = Flask(__name__)
-    password = os.environ.get("APP_PASSWORD", "")
+    env = os.environ.get
     app.config.update(
-        SECRET_KEY=os.environ.get("SECRET_KEY") or secrets.token_hex(32),
-        APP_PASSWORD=password,
+        SECRET_KEY=env("SECRET_KEY") or secrets.token_hex(32),
+        APP_PASSWORD=env("APP_PASSWORD", ""),
+        ADMIN_LOGIN=(env("ADMIN_LOGIN") or "admin").strip().lower(),
+        ADMIN_RESET=_env_flag("ADMIN_RESET", False),
+        DATABASE_URL=env("DATABASE_URL", ""),
+        DATA_DIR=env("DATA_DIR", "data"),
         SESSION_COOKIE_SECURE=_env_flag("SESSION_COOKIE_SECURE", True),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
-        MAX_CONTENT_LENGTH=16 * 1024,
+        PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+        MAX_CONTENT_LENGTH=256 * 1024,
         TRUST_PROXY=_env_flag("TRUST_PROXY", False),
+        CLIENT_IP_HEADER=_client_ip_header(),
+        AUDIT_RETENTION_DAYS=_env_int("AUDIT_RETENTION_DAYS", 30),
+        REPORT_RETENTION_DAYS=_env_int("REPORT_RETENTION_DAYS", 365),
+        CHECKS_PER_MONTH=_env_int("CHECKS_PER_MONTH", quota.DEFAULT_MONTHLY_LIMIT),
+        SCRYPT_N_LOG2=security.SCRYPT_N_LOG2,
+        OPERATOR={
+            "name": env("OPERATOR_NAME", "").strip(),
+            "address": env("OPERATOR_ADDRESS", "").strip(),
+            "email": env("OPERATOR_EMAIL", "").strip(),
+        },
+        EPHEMERAL_HOST=bool(env("RENDER")),
         SCAN_FN=None,  # tests may inject a fake scanner
         ALLOW_PRIVATE_TARGETS=False,
     )
     if config:
         app.config.update(config)
     if app.config["TRUST_PROXY"]:
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)  # type: ignore[method-assign]
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # type: ignore[method-assign]
+
+    store = Store(Database(app.config["DATABASE_URL"], Path(app.config["DATA_DIR"])))
+    store.fail_unfinished_scans()
+    _bootstrap_admin(app, store)
+    app.extensions["tr02102"] = common.Services(
+        store=store,
+        jobs=JobRunner(store, max_workers=2),
+        standards=load_builtin(),
+        # Failed sign-ins: 10 per address, 100 per login name, in 15 minutes.
+        # The second number is higher on purpose. With 10, anybody could lock
+        # the administrator out by typing wrong passwords; with 100 that takes
+        # more than ten addresses, while guessing across many addresses is
+        # still capped.
+        login_limiter=security.RateLimiter(limit=10, window_s=15 * 60),
+        account_limiter=security.RateLimiter(limit=100, window_s=15 * 60),
+        register_limiter=security.RateLimiter(limit=5, window_s=60 * 60),
+        scan_limiter=security.RateLimiter(limit=quota.HOURLY_LIMIT, window_s=60 * 60),
+        # Verified for logins that do not exist, so a wrong login name takes
+        # as long as a wrong password (no user enumeration by timing).
+        dummy_hash=security.hash_password(secrets.token_hex(16), app.config["SCRYPT_N_LOG2"]),
+    )
+
+    # ----------------------------------------------------------- Jinja helpers
 
     app.jinja_env.filters["by_status"] = lambda findings: sorted(
         findings, key=lambda f: -STATUS_RANK[f["status"]]
     )
 
-    standards = load_builtin()
-    jobs = JobStore(max_workers=2, max_jobs=50)
-    login_limiter = RateLimiter(limit=10, window_s=15 * 60)
-    scan_limiter = RateLimiter(limit=10, window_s=60 * 60)
+    def when(timestamp: int | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
+        if not timestamp:
+            return ""
+        return datetime.fromtimestamp(int(timestamp), UTC).strftime(fmt)
 
-    # ------------------------------------------------------------------ helpers
-
-    def scanning_enabled() -> bool:
-        return bool(app.config["APP_PASSWORD"])
-
-    def logged_in() -> bool:
-        return bool(session.get("auth"))
-
-    def csrf_token() -> str:
-        token = session.get("csrf")
-        if not isinstance(token, str):
-            token = secrets.token_urlsafe(32)
-            session["csrf"] = token
-        return token
-
-    def check_csrf() -> None:
-        sent = request.form.get("csrf", "")
-        expected = session.get("csrf", "")
-        if not expected or not hmac.compare_digest(str(sent), str(expected)):
-            abort(400, "invalid form token; reload the page and try again")
-
-    def login_required(view: Callable[P, R]) -> Callable[P, R | Response]:
-        @wraps(view)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | Response:
-            if not logged_in():
-                return redirect(url_for("login", next=request.path))  # type: ignore[return-value]
-            return view(*args, **kwargs)
-
-        return wrapper
-
-    def password_ok(candidate: str) -> bool:
-        expected = app.config["APP_PASSWORD"]
-        if not expected:
-            return False
-        a = hashlib.sha256(candidate.encode()).digest()
-        b = hashlib.sha256(expected.encode()).digest()
-        return hmac.compare_digest(a, b)
-
-    def render_report(
-        rep: dict[str, Any], *, demo: str | None = None, job_id: str | None = None
-    ) -> str:
-        return render_template(
-            "report.html", r=rep, demo=demo, demo_title=DEMOS.get(demo or ""), job_id=job_id
-        )
+    app.jinja_env.filters["when"] = when
+    app.jinja_env.filters["pretty_json"] = lambda data: json.dumps(data, indent=2)
+    app.jinja_env.globals.update(
+        _=common.tr, csrf_token=common.csrf_token, lang_url=common.lang_url
+    )
 
     @app.context_processor
     def inject() -> dict[str, Any]:
+        user = common.current_user()
         return {
-            "csrf_token": csrf_token,
-            "logged_in": logged_in(),
-            "scanning_enabled": scanning_enabled(),
+            "user": user,
+            "is_admin": common.is_admin(),
+            "can_sign_in": store.count_users() > 0,
+            "registration_open": store.setting("registration_open") == "1",
             "version": __version__,
             "controls": CONTROLS,
+            "categories": CATEGORIES,
             "suite_info": suite_info,
+            "lang": g.get("lang", i18n.DEFAULT),
+            "languages": i18n.LANGUAGES,
+            "operator": app.config["OPERATOR"],
         }
+
+    # ------------------------------------------------------------------- hooks
+
+    @app.before_request
+    def prepare() -> None:
+        g.user = None
+        g.lang = i18n.DEFAULT
+        if request.endpoint in ("static", "public.healthz"):
+            return
+        uid = session.get("uid")
+        if uid is not None:
+            user = store.user(int(uid))
+            stamp = security.session_stamp(user["password_hash"]) if user else ""
+            if user and not user["blocked"] and session.get("sv") == stamp:
+                g.user = user
+            else:
+                session.clear()  # deleted, blocked, or the password was changed
+
+        wanted = request.args.get("lang", "")
+        if wanted in i18n.LANGUAGES:
+            session["lang"] = wanted
+            if g.user and g.user.get("locale") != wanted:
+                store.update_user(g.user["id"], locale=wanted)
+        g.lang = (
+            session.get("lang")
+            or (g.user or {}).get("locale")
+            or i18n.from_header(request.headers.get("Accept-Language", ""))
+            or i18n.DEFAULT
+        )
+        if g.lang not in i18n.LANGUAGES:
+            g.lang = i18n.DEFAULT
+
+        if request.method == "POST":
+            common.check_csrf()
 
     @app.after_request
     def security_headers(resp: Response) -> Response:
@@ -184,140 +219,38 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         if request.is_secure:
             resp.headers["Strict-Transport-Security"] = "max-age=31536000"
-        if request.endpoint not in ("static", "healthz"):
+        if request.endpoint not in ("static", "public.healthz"):
             resp.headers["Cache-Control"] = "no-store"
         return resp
 
-    # ------------------------------------------------------------------- routes
-
-    @app.get("/healthz")
-    def healthz() -> dict[str, str]:
-        return {"status": "ok", "version": __version__}
-
-    @app.get("/")
-    def index() -> str:
-        return render_template("index.html", standards=standards.values(), demos=DEMOS)
-
-    @app.get("/standards")
-    def standards_page() -> str:
-        return render_template("standards.html", standards=standards.values())
-
-    @app.route("/login", methods=["GET", "POST"])
-    def login() -> str | Response:
-        if request.method == "POST":
-            check_csrf()
-            ip = request.remote_addr or "unknown"
-            if not login_limiter.allow(ip):
-                flash("Too many attempts. Try again in 15 minutes.", "error")
-            elif password_ok(request.form.get("password", "")):
-                session.clear()
-                session.permanent = True
-                session["auth"] = True
-                csrf_token()
-                target = request.args.get("next", "")
-                safe = target.startswith("/") and not target.startswith("//")
-                return redirect(target if safe else url_for("scan"))  # type: ignore[return-value]
-            else:
-                flash("Wrong password.", "error")
-        return render_template("login.html")
-
-    @app.post("/logout")
-    def logout() -> Response:
-        check_csrf()
-        session.clear()
-        return redirect(url_for("index"))  # type: ignore[return-value]
-
-    @app.route("/scan", methods=["GET", "POST"])
-    @login_required
-    def scan() -> str | Response:
-        target_text = ""
-        chosen = [s.id for s in defaults(standards)]
-        if request.method == "POST":
-            check_csrf()
-            target_text = request.form.get("target", "")[:300]
-            chosen = [s for s in request.form.getlist("standard") if s in standards]
-            try:
-                if not chosen:
-                    raise TargetError("choose at least one standard")
-                host, port = parse_target(target_text)
-                target = resolve(host, port, allow_private=app.config["ALLOW_PRIVATE_TARGETS"])
-            except TargetError as exc:
-                flash(str(exc), "error")
-            else:
-                if not scan_limiter.allow(str(session.get("csrf"))):
-                    flash("Scan limit reached (10 per hour). Try again later.", "error")
-                else:
-                    selected = [standards[s] for s in chosen]
-                    scan_fn = app.config["SCAN_FN"]
-                    job_id = jobs.submit(target, selected, scan_fn)
-                    if job_id is None:
-                        flash("The scanner is busy. Try again in a minute.", "error")
-                    else:
-                        return redirect(url_for("job", job_id=job_id))  # type: ignore[return-value]
-        form = {"target": target_text, "standards": chosen}
-        return render_template("scan.html", form=form, standards=standards.values())
-
-    @app.get("/reports/<job_id>")
-    @login_required
-    def job(job_id: str) -> str:
-        j = jobs.get(job_id)
-        if j is None:
-            abort(404)
-        if j.status in ("queued", "running"):
-            return render_template("pending.html", job=j)
-        if j.status == "error":
-            return render_template("error.html", message=j.error), 500  # type: ignore[return-value]
-        if j.report is None:
-            abort(404)
-        return render_report(j.report, job_id=job_id)
-
-    @app.get("/reports/<job_id>.json")
-    @login_required
-    def job_json(job_id: str) -> Response:
-        j = jobs.get(job_id)
-        if j is None or j.report is None:
-            abort(404)
-        return _json_download(j.report, f"tr02102-audit-{job_id}.json")
-
-    @app.get("/reports/<job_id>.sarif")
-    @login_required
-    def job_sarif(job_id: str) -> Response:
-        j = jobs.get(job_id)
-        if j is None or j.report is None:
-            abort(404)
-        return _json_download(sarif.build(j.report), f"tr02102-audit-{job_id}.sarif")
-
-    @app.get("/demo/<name>")
-    def demo(name: str) -> str:
-        if name not in DEMOS:
-            abort(404)
-        rep = report.build(_load_demo(name), defaults(standards))
-        return render_report(rep, demo=name)
-
-    @app.get("/demo/<name>.json")
-    def demo_json(name: str) -> Response:
-        if name not in DEMOS:
-            abort(404)
-        rep = report.build(_load_demo(name), defaults(standards))
-        return _json_download(rep, f"demo-{name}.json")
-
-    @app.get("/demo/<name>.sarif")
-    def demo_sarif(name: str) -> Response:
-        if name not in DEMOS:
-            abort(404)
-        rep = report.build(_load_demo(name), defaults(standards))
-        return _json_download(sarif.build(rep), f"demo-{name}.sarif")
-
     @app.errorhandler(400)
+    @app.errorhandler(403)
     @app.errorhandler(404)
+    @app.errorhandler(405)
     @app.errorhandler(413)
     def http_error(err: Any) -> tuple[str, int]:
-        return render_template("error.html", message=err.description), err.code
+        messages = {
+            403: common.tr("This page is for administrators."),
+            404: common.tr("This page does not exist."),
+        }
+        message = messages.get(err.code, err.description)
+        return render_template("error.html", message=message, code=err.code), err.code
 
+    @app.errorhandler(StoreError)
+    def database_error(err: StoreError) -> Response:
+        # No template here: rendering one would ask the database again.
+        app.logger.error("database error: %s", err)
+        resp = Response(
+            "The database cannot be reached right now. Try again in a moment.\n",
+            status=503,
+            mimetype="text/plain",
+        )
+        resp.headers["Retry-After"] = "30"
+        return resp
+
+    from tr02102_audit.web import views_account, views_admin, views_public
+
+    app.register_blueprint(views_public.bp)
+    app.register_blueprint(views_account.bp)
+    app.register_blueprint(views_admin.bp)
     return app
-
-
-def _json_download(data: dict[str, Any], filename: str) -> Response:
-    resp = Response(json.dumps(data, indent=2), mimetype="application/json")
-    resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return resp
