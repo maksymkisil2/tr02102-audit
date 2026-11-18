@@ -9,7 +9,7 @@
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/maksymkisil2/tr02102-audit)
 
-![Report for a typical modern website: rating A, yet two government standards say "does not conform"](docs/images/report.png)
+![Report for a typical modern website: rating A, and an action plan that starts with the one requirement it misses](docs/images/report.png)
 
 ## The problem
 
@@ -25,6 +25,8 @@ There is a second problem: **"does not conform" is not the same as "insecure".**
 2. **Compares.** Each standard is a YAML file of rules. One measurement is judged against all of them. What a standard requires (MUST, shall) is a failure when missing; what it recommends (SHOULD) is a warning, exactly as the document words it.
 3. **Rates.** A grade from A+ to F says how good the configuration is by common practice, using only points on which the standards agree. It is the tool's own summary and is labelled as such.
 4. **Explains.** Every finding gives the reason, the evidence, the fix and the section of the standard. Failures that come only from an approved list are marked.
+5. **Plans.** The report opens with an action plan: one step per topic, ranked by what matters most, with the nginx and Apache lines that make the change. The configuration comes from the project's lab, where CI checks it against the standards on every push.
+6. **Compares.** Check a server again after a change and compare the two checks: what it accepts now, which findings are fixed, which are new.
 
 | Standard | Kind | Edition | Rules | Transcription |
 |---|---|---|---|---|
@@ -68,17 +70,20 @@ ISO/IEC 27001, PCI DSS or SOC 2 certificates are issued by accredited auditors a
 
 Click **Deploy to Render** above. Render asks for `APP_PASSWORD`, which becomes the password of the first administrator (login name `admin`). Everything else is preconfigured in [`render.yaml`](render.yaml): free plan, Frankfurt region, Docker.
 
-- **Without an account:** start page, the standards with all their rules, three sample reports.
-- **With an account:** check any public server; reports are kept, can be opened again, deleted, and downloaded as JSON or SARIF. "Print, save as PDF" gives a clean page for an audit file.
+- **Without an account:** start page, what the project is about, the standards with all their rules, three sample reports.
+- **With an account:** check any public server and choose the report format first: web page, PDF, JSON or SARIF. Every report is kept and can be downloaded in all four formats later.
+- **My servers.** Keep a server in a list, check it again with one click, see its rating over time, and compare any two checks.
 - **Accounts and roles.** Registration is closed until an administrator opens it; until then the administrator creates accounts. Every account has a monthly limit of checks (default 50, adjustable per account) and an hourly limit of 30.
-- **Administration.** Who signed in, who failed to, who checked which address, with time, IP address, country and browser; activity per day; accounts can be limited, blocked or deleted.
+- **Administration.** Who signed in, who failed to, who checked which address, with time, IP address, country and browser; activity per day; accounts can be limited, blocked or deleted. The audit log filters by kind, address, account and date and exports to CSV. The overview flags patterns worth a look, such as password guessing from one address, one address trying many login names, or an account that probes private addresses; the rules are listed in [`web/signals.py`](src/tr02102_audit/web/signals.py). It also shows whether the database is reachable and which schema version it has.
 - **Languages.** English, German and Ukrainian. The choice follows the link in the header, then the account, then the browser.
 
-![Administration: activity per day and where requests came from (sample data)](docs/images/admin.png)
+![Administration: signals worth a look and activity per day (sample data)](docs/images/admin.png)
+
+![My servers: one server's history, ready to compare two checks](docs/images/servers.png)
 
 <img src="docs/images/mobile.png" alt="A report on a phone, in German" width="300">
 
-**Keeping data.** Accounts, reports and the audit log live in a database. By default that is an SQLite file under `DATA_DIR`. A free Render service has no persistent disk, so the file is lost on every restart; the administration page says so. Set `DATABASE_URL` to a PostgreSQL database to keep the data. Note that Render's own free PostgreSQL [expires after 30 days](https://render.com/docs/free); any PostgreSQL provider with a permanent free tier works.
+**Keeping data.** Accounts, reports and the audit log live in a database. By default that is an SQLite file under `DATA_DIR`. A free Render service has no persistent disk, so the file is lost on every restart; the administration page says so. Set `DATABASE_URL` to a PostgreSQL database to keep the data. Render's own free PostgreSQL [expires after 30 days](https://render.com/docs/free); a permanent free tier such as [Neon](https://neon.com/docs/introduction/plans) (1 GB per project, the database sleeps after 5 minutes without queries) is enough for one instance. The service reconnects by itself when such a database wakes up, and new versions upgrade the schema on start-up.
 
 | Variable | Meaning | Default |
 |---|---|---|
@@ -91,9 +96,22 @@ Click **Deploy to Render** above. Render asks for `APP_PASSWORD`, which becomes 
 | `CHECKS_PER_MONTH` | Monthly limit of an account, unless an administrator sets another one | `50` |
 | `AUDIT_RETENTION_DAYS`, `REPORT_RETENTION_DAYS` | How long audit events and reports are kept | `30`, `365` |
 | `OPERATOR_NAME`, `OPERATOR_ADDRESS`, `OPERATOR_EMAIL` | Who runs the instance; shown in the imprint and the privacy notice | none |
+| `PRIVATE_NETWORKS` | Private networks that may be checked anyway, for a lab: `172.30.80.0/24, 192.168.1.0/24`. Every other private address stays refused. | none |
+| `CA_FILE` | Extra trusted certificate authorities (PEM file), for a lab or a company PKI | none |
 | `TRUST_PROXY`, `CLIENT_IP_HEADER` | Behind a reverse proxy: trust its headers, and which header carries the visitor's address. The image sets `TRUST_PROXY=1`; on Render the header is detected. | off |
 
 The legal pages (imprint, privacy, terms of use) describe what the software stores and does. Whoever runs a public instance has to review and complete them; they are not legal advice.
+
+### On your own computer: the lab
+
+The lab starts the web interface together with test servers on a laptop with Docker, so you can configure a server yourself and watch each change in the report:
+
+```bash
+docker compose -f lab/docker-compose.yml up -d --build
+# open http://127.0.0.1:8080, sign in as admin / lab-admin-password, check "my-site"
+```
+
+`my-site` starts with nginx's default TLS settings; its configuration file lists exercises from rating A to full BSI conformity. Details: [lab/README.md](lab/README.md).
 
 ### Command line
 
@@ -102,6 +120,7 @@ python -m pip install .
 
 tr02102-audit scan example.org                  # the five formal standards, text report
 tr02102-audit scan example.org:8443 -s bsi-tr-02102-2 -f json -o report.json
+tr02102-audit scan example.org -f pdf -o report.pdf               # PDF with the action plan
 tr02102-audit scan intranet.example --ca-file company-ca.pem    # internal PKI
 tr02102-audit evaluate report.json -s all        # re-judge a stored scan, no network
 tr02102-audit standards                          # list standards
@@ -145,7 +164,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Security of the tool itself
 
-A hosted scanner parses data from servers it does not control, holds accounts, and could be misused to probe other people's networks. The [threat model](docs/THREAT_MODEL.md) covers 26 threats with STRIDE; the most important ones:
+A hosted scanner parses data from servers it does not control, holds accounts, and could be misused to probe other people's networks. The [threat model](docs/THREAT_MODEL.md) covers 28 threats with STRIDE; the most important ones:
 
 | Threat | Response |
 |---|---|
@@ -160,7 +179,8 @@ A hosted scanner parses data from servers it does not control, holds accounts, a
 
 ## Quality
 
-- 187 tests: end-to-end scans of real OpenSSL servers, hostile input for every parser, and the web interface (roles, CSRF, SSRF, limits, session handling, languages).
+- 223 tests: end-to-end scans of real OpenSSL servers, hostile input for every parser, the web interface (roles, CSRF, SSRF, limits, session handling, languages), schema upgrades, PDF output and the action plan, whose cipher lists are checked against OpenSSL.
+- In CI the lab's web interface is built from the commit and used end to end, the way a person would: sign in, check, download a PDF, check again, compare.
 - The storage and web tests run on SQLite and again on PostgreSQL in CI.
 - CI on every push: Ruff (with security rules), mypy in strict mode, pytest, SARIF output validated against the official schema, a Docker Compose lab whose servers are scanned by the CLI, and a container build that is started and signed in to.
 - Weekly dependency audit; GitHub Actions pinned to commit hashes; read-only workflow token; Dependabot.
@@ -193,6 +213,7 @@ Interface texts live in `src/tr02102_audit/web/locale/<language>.json`. A test f
 | M1.6 | International standards: NIST SP 800-52r2, IETF RFC 9325, NCSC-NL 2025-05 | Done |
 | M2 | SARIF output, CI integration, first release | Done |
 | M2.2 | Requirement levels, rating, PCI DSS, validation against OpenSSL; accounts, administration with audit log, three languages | Done |
+| M2.3 | Action plan with server configuration, PDF reports, saved servers with before/after comparison, audit-log filters, CSV export and signals, the lab on a laptop | Done |
 | M2.1 | Line-by-line verification of the BSI, NCSC-NL and Mozilla transcriptions | Next |
 | M3 | SSH prober, BSI TR-02102-4 | Planned |
 | M4 | strongSwan configuration parser, BSI TR-02102-3 | Planned |

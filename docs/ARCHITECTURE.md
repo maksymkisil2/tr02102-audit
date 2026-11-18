@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: living document · Implemented: M0, M1, M1.5, M1.6, M2, M2.2 · Last updated: 2026-11-16
+> Status: living document · Implemented: M0, M1, M1.5, M1.6, M2, M2.2, M2.3 · Last updated: 2026-11-18
 
 ## 1. Purpose
 
@@ -189,10 +189,11 @@ The prober builds ClientHello messages itself instead of relying on a TLS librar
 
 | Format | Consumer |
 |---|---|
-| JSON | Scripts, archival, later re-evaluation |
+| JSON | Scripts, archival, later re-evaluation; includes the action plan |
 | Text | Terminal |
 | SARIF 2.1.0 | GitHub code scanning and other CI dashboards; validated against the official schema in CI |
-| HTML | The report page of the web interface; no scripts, with a print stylesheet for "save as PDF" |
+| HTML | The report page of the web interface; no scripts, with a print stylesheet |
+| PDF | The same report for an audit file: summary, action plan with configuration, comparison, evidence (`--format pdf` or the web interface) |
 | CycloneDX CBOM | Cryptographic inventory (M5) |
 
 Every report embeds: tool version, policy edition and SHA-256, UTC timestamp, target, resolved IP, and the options used.
@@ -244,10 +245,14 @@ flowchart LR
 ```
 
 - **Same code as the CLI.** The web layer adds accounts, the target guard, a job queue and storage. Scanning and judging are the functions the CLI calls.
+- **Saved servers and comparison.** An account can keep a server in a list. Its history is every check of that address by that account. `compare.py` is a pure function of two reports: the measured lists that gained or lost entries, changed single values, changed verdicts, and findings that were fixed or appeared.
+- **Action plan and PDF.** `advice.py` turns the findings of all standards into one action per topic, ranked by the rating and the requirement levels, with nginx and Apache configuration in two profiles taken from the lab. `web/pdf.py` renders the same report dictionary with reportlab and a bundled DejaVu font, so the web page, the PDF and the JSON cannot disagree.
 - **No JavaScript.** Scans run in the background; the report page refreshes itself until the job is done. The Content-Security-Policy stays at `default-src 'none'`. The activity chart in the administration is server-rendered SVG.
 - **Accounts and roles.** Two roles, user and administrator. The first administrator is created at start-up from `APP_PASSWORD`; without it the instance only shows the sample reports. Registration is a setting an administrator switches on; until then accounts are created by hand.
-- **What is stored.** Four tables: `users`, `scans` (the observation as JSON plus grade and verdicts, so a report can be rebuilt with the current rules), `events` (the audit log) and `settings`. Reports and audit events are deleted after their retention time.
+- **What is stored.** Five tables: `users`, `scans` (the observation as JSON plus grade, verdicts and the report format chosen before the check, so a report can be rebuilt with the current rules), `targets` (servers an account keeps in its list), `events` (the audit log) and `settings`. Reports and audit events are deleted after their retention time.
+- **Schema changes.** `settings.schema_version` records the version. `store.py` keeps the version 1 tables and a list of later steps (`_MIGRATIONS`) that run once, in order, at start-up; a step that adds a column checks first, so an interrupted upgrade can run again. A new version of the service therefore upgrades an existing SQLite file or PostgreSQL database in place.
 - **Audit log.** Sign-ins, failed sign-ins, registrations, checks started, refused and finished, and administrative changes, each with time, account, IP address, country and browser. Behind a proxy the visitor's address is read from the header the operator names (`CLIENT_IP_HEADER`; on Render `CF-Connecting-IP`), never from a header the client can simply send (T-26).
+- **Administration.** Overview with figures, activity per day, signals and the state of the database; audit log with filters (kind, text, address, account, dates) and CSV export; checks; saved servers of all accounts; accounts. Each page is one view in `views_admin.py` and one template; a new page is added the same way and listed in `_admin_nav.html`. Signals (`signals.py`) are rules of the form "events of these kinds, per address or account, in this window, at least this many"; a new rule is one entry in a list.
 - **Limits.** Per account: checks per month (in the database) and per hour (in memory). Per address: failed sign-ins and registrations.
 - **Languages.** English, German, Ukrainian. Templates and messages pass through one function; the English text is the key, so a missing translation shows English instead of a placeholder. Rule texts are quoted from the standards and stay in English.
 - **One process.** Jobs and the in-memory limits assume a single process (gunicorn with one worker and threads). Scaling out would need a shared queue and counter.
@@ -268,18 +273,23 @@ tr02102-audit/
 │   ├── engine.py            # rules + facts -> findings (pure)
 │   ├── rating.py, rating.yaml   # overall grade A+ to F
 │   ├── report.py            # report assembly, comparison, text output
+│   ├── advice.py            # action plan and recommended configuration
+│   ├── compare.py           # what changed between two checks
 │   ├── sarif.py             # SARIF 2.1.0 output for CI dashboards
+│   ├── fonts/               # DejaVu fonts for PDF reports (with licence)
 │   ├── standards/           # one YAML file per standard + loader
 │   └── web/
 │       ├── __init__.py      # application factory, configuration, headers
 │       ├── store.py         # SQLite / PostgreSQL
 │       ├── security.py      # passwords, rate limits, visitor address
 │       ├── quota.py         # limits per account
+│       ├── signals.py       # patterns in the audit log worth a look
+│       ├── pdf.py, reporting.py  # PDF and the other report formats
 │       ├── i18n.py, locale/ # interface languages
-│       ├── views_*.py       # public pages, account pages, administration
+│       ├── views_*.py       # public pages, account pages, saved servers, administration
 │       └── templates/, static/, demo/
 ├── examples/                # ready-to-copy CI workflow
-├── lab/                     # docker-compose.yml: three TLS servers with known configurations
+├── lab/                     # docker-compose.yml: known TLS servers, my-site, the web interface
 ├── validation/              # cross-check of the scanner against OpenSSL on public servers
 ├── tests/                   # unit, web and end-to-end tests
 ├── docs/                    # ARCHITECTURE.md, THREAT_MODEL.md, STANDARDS.md, adr/
@@ -297,6 +307,7 @@ tr02102-audit/
 | M1.6 | International standards (NIST SP 800-52r2, IETF RFC 9325, NCSC-NL 2025-05); phase-out levels in rules | Done |
 | M2 | SARIF 2.1.0 output, CI integration example, first release | Done |
 | M2.2 | Requirement levels (MUST and SHOULD kept apart), overall rating, PCI DSS 4.2.1, validation against OpenSSL, scan safeguards; accounts, roles, administration with audit log, PostgreSQL, three interface languages | Done |
+| M2.3 | Action plan with configuration, PDF, saved servers and comparison, audit-log filters, export and signals, schema migrations, the lab with the web interface | Done |
 | M2.1 | Line-by-line verification of the draft transcriptions | Next |
 | M3 | SSH prober, TR-02102-4 rules | Planned |
 | M4 | strongSwan configuration parser, TR-02102-3 rules | Planned |

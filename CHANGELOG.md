@@ -10,6 +10,86 @@ Planned: SSH (BSI TR-02102-4) and IPsec (BSI TR-02102-3) collectors, a
 cryptographic bill of materials, and a line-by-line review of the BSI,
 NCSC-NL and Mozilla transcriptions.
 
+## [0.3.0] - 2026-11-18
+
+A report now says what to do first and how; a server can be checked again
+and compared; the administration helps to spot misuse; and the whole service
+runs on a laptop next to servers you configure yourself.
+
+### Added
+
+**Reports**
+
+- An action plan at the top of every report: one step per topic, ranked
+  critical, high, medium or low. Only the rating, which uses points all
+  standards agree on, can make a step critical or high; a requirement of a
+  single standard is medium; a matter of an approved list is low.
+- Each step carries the nginx and Apache lines that make the change, in a
+  compatible and a strict profile. Both profiles are the lab's `tls-typical`
+  and `tls-good` configurations, which CI checks on every push; the cipher
+  lists are also checked against OpenSSL in the tests.
+- PDF reports, built from the same report as the web page, with a bundled
+  font for German and Ukrainian text. Also on the command line:
+  `--format pdf --output report.pdf`.
+- The report format is chosen before the check (web page, PDF, JSON, SARIF);
+  the finished report offers that download first. JSON includes the action
+  plan.
+
+**Servers and history**
+
+- "My servers": keep a server in a list with a name and its standards, check
+  it again with one click, see its rating over time.
+- Before and after: compare two checks of a server. Shows the protocol
+  versions, cipher suites and groups that were added or removed, changed
+  values, changed verdicts, fixed findings and new problems.
+
+**Administration**
+
+- The audit log filters by kind, text, IP address, account and date range,
+  and exports to CSV (Excel-compatible UTF-8, protected against formula
+  injection). Every export is itself logged.
+- Signals on the overview: many failed sign-ins from one address, one
+  address trying many login names, many failed sign-ins for one account,
+  repeated attempts to check private addresses, unusually many checks, many
+  different hosts from one account, many registrations from one address.
+- The overview shows whether the database is reachable, its response time,
+  its schema version and what it holds; the servers of all accounts have
+  their own page.
+
+**Lab**
+
+- `docker compose -f lab/docker-compose.yml up -d --build` starts the web
+  interface together with the lab servers on a laptop.
+- `my-site`: a server with nginx's default settings to practise on, with
+  exercises in its configuration file.
+- `PRIVATE_NETWORKS` allows named private networks (the lab's) to be
+  checked; `CA_FILE` trusts an extra CA in the web interface.
+- CI builds the lab's web interface and uses it end to end
+  (`lab/scripts/web-e2e.py`).
+
+**Website**
+
+- New start page blocks: the idea, how a check works, what a report contains,
+  who it is for, the lab. A new page about the project: principles, how it is
+  built, limits, how to start the lab.
+
+### Changed
+
+- The database schema has a version and upgrades itself at start-up
+  (version 2: saved servers, report format). Hosted PostgreSQL that sleeps or
+  drops idle connections (Neon, Supabase) is reconnected without prepared
+  statements.
+- A login name nobody owns is stored with a four-character keyed hash next
+  to its first two characters, so password spraying stays visible without
+  revealing the name.
+- "Print, save as PDF" is replaced by a real PDF download.
+
+### Security
+
+- Threat model: T-27 formula injection through the CSV export, T-28 markup
+  injection into the PDF; T-14, T-18 and T-25 extended for lab networks,
+  saved servers and the keyed login mark.
+
 ## [0.2.0] - 2026-11-16
 
 The verdicts now say what the standards say, a rating says how good a
@@ -172,6 +252,7 @@ standards, from a terminal, a web interface or a CI pipeline.
 - The hosted web service keeps jobs, reports and rate limits in process
   memory, which suits a single instance.
 
-[Unreleased]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/maksymkisil2/tr02102-audit/releases/tag/v0.1.0
