@@ -4,12 +4,19 @@ The web service must not become a proxy into private networks (SSRF). The
 host name is resolved once, every resolved address is checked, and all probes
 then connect to that one pinned address. A DNS answer that changes between
 check and use (DNS rebinding) therefore cannot redirect a probe.
+
+An operator can name private networks that may be checked anyway, for a test
+lab on the same machine (``PRIVATE_NETWORKS``). Everything else private stays
+refused.
 """
 
 import ipaddress
 import re
 import socket
+from collections.abc import Sequence
 from dataclasses import dataclass
+
+Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 _HOSTNAME = re.compile(
     r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*\.?$"
@@ -81,8 +88,31 @@ def is_public(address: str) -> bool:
     return ip.is_global and not ip.is_multicast
 
 
-def resolve(host: str, port: int, *, allow_private: bool) -> ResolvedTarget:
-    """Resolve ``host`` and pin one address; refuse non-public ones if required."""
+def parse_networks(text: str) -> tuple[Network, ...]:
+    """Networks from a comma- or space-separated list such as "172.30.0.0/24, 10.0.0.5"."""
+    networks = []
+    for item in text.replace(",", " ").split():
+        try:
+            networks.append(ipaddress.ip_network(item, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"not a network or address: {item!r}") from exc
+    return tuple(networks)
+
+
+def _allowed(address: str, networks: Sequence[Network]) -> bool:
+    ip = ipaddress.ip_address(address)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return any(ip in network for network in networks)
+
+
+def resolve(
+    host: str, port: int, *, allow_private: bool, allowed_networks: Sequence[Network] = ()
+) -> ResolvedTarget:
+    """Resolve ``host`` and pin one address; refuse non-public ones if required.
+
+    ``allowed_networks`` lists private networks that may be checked anyway.
+    """
     _validate_host(host)
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -93,7 +123,7 @@ def resolve(host: str, port: int, *, allow_private: bool) -> ResolvedTarget:
     if not addresses:
         raise TargetError(f"no address for {host}", "unresolved")
     if not allow_private:
-        blocked = [a for a in addresses if not is_public(a)]
+        blocked = [a for a in addresses if not is_public(a) and not _allowed(a, allowed_networks)]
         if blocked:
             raise TargetError(
                 "target resolves to a private, loopback or reserved address; "

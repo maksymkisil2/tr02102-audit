@@ -19,7 +19,7 @@
       </a>
       <nav class="nav" aria-label="{{ _('Main') }}">
         {% macro item(endpoint, label) %}<a href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint %} aria-current="page"{% endif %}>{{ label }}</a>{% endmacro %}
-        {% if user %}{{ item('account.scan', _('New check')) }}{{ item('account.reports', _('Reports')) }}{% endif %}
+        {% if user %}{{ item('account.scan', _('New check')) }}{{ item('servers.servers', _('My servers')) }}{{ item('account.reports', _('Reports')) }}{% endif %}
         {{ item('public.standards_page', _('Standards')) }}
         {% if is_admin %}{{ item('admin.overview', _('Administration')) }}{% endif %}
       </nav>

@@ -15,7 +15,7 @@ def test_settings_are_replaced_not_duplicated(store: Store) -> None:
     store.set_setting("registration_open", "1")
     store.set_setting("registration_open", "0")
     assert store.setting("registration_open") == "0"
-    assert store.setting("schema_version") == "1"
+    assert store.setting("schema_version") == "2"
 
 
 def test_users_have_unique_logins_and_whitelisted_columns(store: Store) -> None:

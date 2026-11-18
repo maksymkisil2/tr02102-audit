@@ -8,6 +8,12 @@
 {% block title %}{{ t.host }}:{{ t.port }}{% endblock %}
 {% block content %}
 
+{% if scan and scan.output and scan.output != 'web' %}
+  <div class="note ready no-print">
+    <p><strong>{{ _('Your report is ready.') }}</strong> {{ _('You chose this format before the check:') }} {{ _(formats[scan.output]) }}.</p>
+    <a class="btn slim" href="{{ url_for('account.report_file', public_id=scan.public_id, fmt=scan.output) }}">{{ _('Download') }} {{ scan.output|upper }}</a>
+  </div>
+{% endif %}
 {% if demo %}
   <p class="note">{{ _('Sample report, recorded in the project’s test lab and evaluated with the current rules.') }} {{ _(demo_title) }}.</p>
 {% endif %}
@@ -38,17 +44,34 @@
       <p class="quiet small">{{ _('Could not be checked:') }} {{ _(item.title) }}</p>
     {% endfor %}
 
+    <p class="summary-line">
+      {{ _('%(met)s of %(all)s standards met.', met=summary.conform, all=summary.standards) }}
+      {% if actions %}{{ _('Actions: %(critical)s critical, %(high)s high, %(medium)s medium, %(low)s low.', **summary.actions) }}{% endif %}
+    </p>
+
     <div class="actions">
-      {% if demo %}
-        <a class="btn plain slim" href="{{ url_for('public.demo_json', name=demo) }}">JSON</a>
-        <a class="btn plain slim" href="{{ url_for('public.demo_sarif', name=demo) }}">SARIF</a>
-      {% elif scan %}
-        <a class="btn plain slim" href="{{ url_for('account.report_json', public_id=scan.public_id) }}">JSON</a>
-        <a class="btn plain slim" href="{{ url_for('account.report_sarif', public_id=scan.public_id) }}">SARIF</a>
-        <a class="btn slim" href="{{ url_for('account.scan', target=t.host ~ ':' ~ t.port) }}">{{ _('Check again') }}</a>
+      {% for fmt in ['pdf', 'json', 'sarif'] %}
+        {% if demo %}
+          <a class="btn {{ '' if fmt == 'pdf' else 'plain ' }}slim" href="{{ url_for('public.demo_file', name=demo, fmt=fmt) }}">{{ fmt|upper }}</a>
+        {% elif scan %}
+          <a class="btn {{ '' if fmt == 'pdf' else 'plain ' }}slim" href="{{ url_for('account.report_file', public_id=scan.public_id, fmt=fmt) }}">{{ fmt|upper }}</a>
+        {% endif %}
+      {% endfor %}
+      {% if scan %}
+        {% if saved %}
+          <form method="post" action="{{ url_for('servers.check', target_id=saved.id) }}" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+            <button class="btn plain slim" type="submit">{{ _('Check again') }}</button>
+          </form>
+          <a class="btn plain slim" href="{{ url_for('servers.server', target_id=saved.id) }}">{{ _('History') }}</a>
+        {% else %}
+          <a class="btn plain slim" href="{{ url_for('account.scan', target=t.host ~ ':' ~ t.port) }}">{{ _('Check again') }}</a>
+        {% endif %}
+        {% if previous %}
+          <a class="btn plain slim" href="{{ url_for('servers.compare_page', a=previous.public_id, b=scan.public_id) }}">{{ _('Compare with the previous check') }}</a>
+        {% endif %}
       {% endif %}
     </div>
-    <p class="hint no-print">{{ _('To keep a PDF, print this page and choose “Save as PDF”.') }}</p>
   </div>
 </section>
 
@@ -61,6 +84,60 @@
     {% for n in obs.notes %}<p class="small">{{ n }}</p>{% endfor %}
   </div>
 {% endif %}
+
+<section id="plan">
+  <h2>{{ _('What to do, in this order') }}</h2>
+  {% if actions %}
+    <p class="quiet">{{ _('Each step groups everything the standards say about one topic. Critical and high come from the rating, which only uses points all standards agree on; medium is required by at least one standard; low is a recommendation or only a matter of an approved list.') }}</p>
+    <ol class="plan">
+      {% for a in actions %}
+        <li class="sheet step-{{ a.priority }}">
+          <div class="plan-head">
+            <span class="prio prio-{{ a.priority }}">{{ _(priority_text[a.priority]) }}</span>
+            <h3>{{ _(a.title) }}</h3>
+            {% if a.rating_cap %}<span class="tag">{{ _('Caps the rating at %(grade)s.', grade=a.rating_cap) }}</span>{% endif %}
+          </div>
+          <p>{{ _(a.reason) }}</p>
+          {% if a.affected %}
+            <p class="small quiet">{{ _('Affects:') }}
+              {% for x in a.affected %}<a href="#{{ x.standard_id }}">{{ x.standard }}</a> ({{ _('required') if x.status == 'fail' else _('recommended') }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+          {% endif %}
+          {% if a.off_list_only %}<p class="small"><span class="tag warn">{{ _('approved list only') }}</span> {{ _('Needed only for conformity with an approved list; the current choice is not weak.') }}</p>{% endif %}
+          {% if a.evidence %}
+            <p class="small"><strong>{{ _('Found:') }}</strong> <span class="code">{{ a.evidence[:8]|join(', ') }}</span>{% if a.evidence|length > 8 %} <span class="quiet">{{ _('and %(n)s more', n=a.evidence|length - 8) }}</span>{% endif %}</p>
+          {% endif %}
+          {% if a.same_as %}
+            <p class="small quiet">{{ _('Same configuration as action %(n)s.', n=a.same_as) }}</p>
+          {% elif a.snippets %}
+            <div class="snippets">
+              {% for server, lines in a.snippets.items() %}
+                <figure><figcaption>{{ server }}</figcaption><pre><code>{{ lines|join('\n') }}</code></pre></figure>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="note">{{ _('No weakness found.') }}</p>
+  {% endif %}
+
+  <details class="sheet">
+    <summary>{{ _('Recommended configuration') }}</summary>
+    <p class="quiet small">{{ _('Both profiles are taken from the project’s test lab, where every push checks them against the standards.') }}</p>
+    <div class="columns">
+      {% for name, config in profiles.items() %}
+        <div>
+          <h3>{{ _(profile_text[name][0]) }}</h3>
+          <p class="small">{{ _(profile_text[name][1]) }}</p>
+          {% for server, lines in config.items() %}
+            <figure><figcaption>{{ server }}</figcaption><pre><code>{{ lines|join('\n') }}</code></pre></figure>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+  </details>
+</section>
 
 <section>
   <h2>{{ _('Conformance') }}</h2>

@@ -17,6 +17,10 @@ Configuration (environment variables):
                             sets another one for it (default: 50)
     OPERATOR_NAME, OPERATOR_ADDRESS, OPERATOR_EMAIL
                             who runs this instance; shown on the legal pages
+    PRIVATE_NETWORKS        private networks that may be checked anyway, for a test
+                            lab: "172.30.0.0/24, 192.168.1.0/24" (default: none)
+    CA_FILE                 extra trusted certificate authorities (PEM), for a lab or
+                            a company PKI; the public ones stay trusted
 """
 
 import json
@@ -29,11 +33,12 @@ from typing import Any
 from flask import Flask, Response, g, render_template, request, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from tr02102_audit import __version__
+from tr02102_audit import __version__, netguard
 from tr02102_audit.engine import STATUS_RANK
+from tr02102_audit.scan import scan_tls
 from tr02102_audit.standards import CATEGORIES, CONTROLS, load_builtin
 from tr02102_audit.tls.registry import suite_info
-from tr02102_audit.web import common, i18n, quota, security
+from tr02102_audit.web import common, i18n, quota, security, signals
 from tr02102_audit.web.jobs import JobRunner
 from tr02102_audit.web.store import Database, Store, StoreError
 
@@ -114,9 +119,16 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         EPHEMERAL_HOST=bool(env("RENDER")),
         SCAN_FN=None,  # tests may inject a fake scanner
         ALLOW_PRIVATE_TARGETS=False,
+        PRIVATE_NETWORKS=netguard.parse_networks(env("PRIVATE_NETWORKS", "")),
+        CA_FILE=env("CA_FILE", "").strip(),
     )
     if config:
         app.config.update(config)
+    if isinstance(app.config["PRIVATE_NETWORKS"], str):
+        app.config["PRIVATE_NETWORKS"] = netguard.parse_networks(app.config["PRIVATE_NETWORKS"])
+    if app.config["SCAN_FN"] is None and app.config["CA_FILE"]:
+        ca_file = app.config["CA_FILE"]
+        app.config["SCAN_FN"] = lambda target: scan_tls(target, ca_file=ca_file)
     if app.config["TRUST_PROXY"]:
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # type: ignore[method-assign]
 
@@ -155,7 +167,10 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     app.jinja_env.filters["when"] = when
     app.jinja_env.filters["pretty_json"] = lambda data: json.dumps(data, indent=2)
     app.jinja_env.globals.update(
-        _=common.tr, csrf_token=common.csrf_token, lang_url=common.lang_url
+        _=common.tr,
+        csrf_token=common.csrf_token,
+        lang_url=common.lang_url,
+        flagged=signals.flagged,
     )
 
     @app.context_processor
@@ -248,9 +263,10 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         resp.headers["Retry-After"] = "30"
         return resp
 
-    from tr02102_audit.web import views_account, views_admin, views_public
+    from tr02102_audit.web import views_account, views_admin, views_public, views_servers
 
     app.register_blueprint(views_public.bp)
     app.register_blueprint(views_account.bp)
+    app.register_blueprint(views_servers.bp)
     app.register_blueprint(views_admin.bp)
     return app

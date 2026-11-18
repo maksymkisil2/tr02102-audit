@@ -6,21 +6,44 @@
 {% include "_admin_nav.html" %}
 <section>
   <p class="quiet">{{ _('Every sign-in, failed sign-in, check and change, with the address it came from. Entries are deleted after %(n)s days.', n=retention_days) }}</p>
-  <form method="get" class="row sheet">
+  <form method="get" class="filters sheet">
     <div>
       <label for="kind">{{ _('Kind') }}</label>
       <select id="kind" name="kind">
         <option value="">{{ _('all') }}</option>
-        {% for g in groups %}<option value="{{ g }}"{% if g == kind %} selected{% endif %}>{{ g }}</option>{% endfor %}
+        {% for g in groups %}<option value="{{ g }}"{% if g == form.kind %} selected{% endif %}>{{ g }}</option>{% endfor %}
+        {% if form.kind and form.kind not in groups %}<option value="{{ form.kind }}" selected>{{ form.kind }}</option>{% endif %}
       </select>
     </div>
-    <div class="grow">
+    <div class="wide">
       <label for="q">{{ _('Login name, address or text') }}</label>
-      <input id="q" name="q" type="search" value="{{ q }}">
+      <input id="q" name="q" type="search" value="{{ form.q }}">
     </div>
-    <button class="btn" type="submit">{{ _('Filter') }}</button>
+    <div>
+      <label for="ip">{{ _('IP address') }}</label>
+      <input id="ip" name="ip" type="text" value="{{ form.ip }}" spellcheck="false">
+    </div>
+    <div>
+      <label for="login">{{ _('Account') }}</label>
+      <input id="login" name="login" type="text" value="{{ form.login }}" spellcheck="false">
+    </div>
+    <div>
+      <label for="from">{{ _('From (date)') }}</label>
+      <input id="from" name="from" type="date" value="{{ form['from'] }}">
+    </div>
+    <div>
+      <label for="to">{{ _('To (date)') }}</label>
+      <input id="to" name="to" type="date" value="{{ form.to }}">
+    </div>
+    <div class="filter-buttons">
+      <button class="btn" type="submit">{{ _('Filter') }}</button>
+      {% if form %}<a href="{{ url_for('admin.events') }}">{{ _('Reset') }}</a>{% endif %}
+    </div>
   </form>
-  <p class="quiet small">{{ _('%(n)s entries', n=total) }}</p>
+  <div class="row-between">
+    <p class="quiet small">{{ _('%(n)s entries', n=total) }}</p>
+    <a class="btn plain slim" href="{{ url_for('admin.events_csv', **form) }}">{{ _('Export as CSV') }}</a>
+  </div>
   <div class="sheet scroll">
     {% include "_events_table.html" %}
   </div>
