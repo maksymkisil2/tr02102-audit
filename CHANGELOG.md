@@ -10,6 +10,40 @@ Planned: SSH (BSI TR-02102-4) and IPsec (BSI TR-02102-3) collectors, a
 cryptographic bill of materials, and a line-by-line review of the BSI,
 NCSC-NL and Mozilla transcriptions.
 
+## [0.3.1] - 2026-11-18
+
+Reports are easier to read: the key figures come first, the details stay
+folded until needed, and one misleading step is gone.
+
+### Fixed
+
+- A server that already refuses TLS 1.0 and 1.1 was told to "switch off old
+  protocol versions" when only Mozilla's Modern profile objected, because
+  that profile files "only TLS 1.3" under the same topic. This is now its
+  own step, "Offer only TLS 1.3", with its own configuration and a note on
+  which clients it locks out.
+- Two labels of the action plan ("Required by:", "Recommended by:") were
+  passed to the translation through a variable and escaped the check for
+  missing translations; they are now registered like every other such text.
+- "1 warnings" and "1 standards" in report summaries.
+- PDF: tables were wider than the text frame and sat a few points to the
+  left of the headings; standard names broke in the middle of a word in
+  the comparison matrix.
+
+### Changed
+
+- Web report: key figures under the rating (standards met, steps by
+  priority, a zero in grey), a navigation bar that stays at the top while
+  scrolling, steps that list the standards requiring and recommending the
+  change separately, low-priority steps folded into one group, a legend for
+  the comparison matrix with problem cells tinted, and findings folded per
+  standard with the verdict and counts in the summary line. A typical report
+  is half as long.
+- PDF report: the same key figures on the first page, the rating reasons
+  with their grade, tinted verdicts, steps with a bar in their priority
+  colour and nginx and Apache side by side, and the "approved list" note
+  once per standard instead of once per finding.
+
 ## [0.3.0] - 2026-11-18
 
 A report now says what to do first and how; a server can be checked again
@@ -252,7 +286,8 @@ standards, from a terminal, a web interface or a CI pipeline.
 - The hosted web service keeps jobs, reports and rate limits in process
   memory, which suits a single instance.
 
-[Unreleased]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/maksymkisil2/tr02102-audit/releases/tag/v0.1.0

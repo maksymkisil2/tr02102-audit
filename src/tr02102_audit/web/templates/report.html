@@ -7,6 +7,41 @@
 {% set rate = r.rating %}
 {% block title %}{{ t.host }}:{{ t.port }}{% endblock %}
 {% block content %}
+{% macro step(a, number) %}
+  <li class="sheet step-{{ a.priority }}">
+    <div class="plan-head">
+      <span class="prio prio-{{ a.priority }}">{{ _(priority_text[a.priority]) }}</span>
+      <h3><span class="step-no">{{ number }}.</span> {{ _(a.title) }}</h3>
+      {% if a.rating_cap %}<span class="tag">{{ _('Caps the rating at %(grade)s.', grade=a.rating_cap) }}</span>{% endif %}
+      {% if a.off_list_only %}<span class="tag warn">{{ _('approved list only') }}</span>{% endif %}
+    </div>
+    <p class="step-reason">{{ _(a.reason) }}</p>
+    {% if a.off_list_only %}<p class="small quiet">{{ _('Needed only for conformity with an approved list; the current choice is not weak.') }}</p>{% endif %}
+    <dl class="step-facts small">
+      {% if a.evidence %}
+        <dt>{{ _('Found:') }}</dt>
+        <dd><span class="code">{{ a.evidence[:8]|join(', ') }}</span>{% if a.evidence|length > 8 %} <span class="quiet">{{ _('and %(n)s more', n=a.evidence|length - 8) }}</span>{% endif %}</dd>
+      {% endif %}
+      {% for status, label in role_text.items() %}
+        {% set group = a.affected|selectattr('status', 'equalto', status)|list %}
+        {% if group %}
+          <dt>{{ _(label) }}</dt>
+          <dd class="affects">{% for x in group %}<a href="#{{ x.standard_id }}">{{ x.standard }}</a>{% endfor %}</dd>
+        {% endif %}
+      {% endfor %}
+    </dl>
+    {% if a.same_as %}
+      <p class="small quiet">{{ _('Same configuration as action %(n)s.', n=a.same_as) }}</p>
+    {% elif a.snippets %}
+      <div class="snippets">
+        {% for server, lines in a.snippets.items() %}
+          <figure><figcaption>{{ server }}</figcaption><pre><code>{{ lines|join('\n') }}</code></pre></figure>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </li>
+{% endmacro %}
+
 
 {% if scan and scan.output and scan.output != 'web' %}
   <div class="note ready no-print">
@@ -44,10 +79,19 @@
       <p class="quiet small">{{ _('Could not be checked:') }} {{ _(item.title) }}</p>
     {% endfor %}
 
-    <p class="summary-line">
-      {{ _('%(met)s of %(all)s standards met.', met=summary.conform, all=summary.standards) }}
-      {% if actions %}{{ _('Actions: %(critical)s critical, %(high)s high, %(medium)s medium, %(low)s low.', **summary.actions) }}{% endif %}
-    </p>
+    <dl class="tally">
+      <div class="tally-standards">
+        <dt>{{ _('Standards met') }}</dt>
+        <dd><a href="#conformance">{{ _('%(met)s of %(all)s', met=summary.conform, all=summary.standards) }}</a></dd>
+      </div>
+      {% for p in priorities %}
+        {% set n = summary.actions[p] %}
+        <div class="tally-{{ p }}{% if not n %} zero{% endif %}">
+          <dt>{{ _(priority_text[p]) }}</dt>
+          <dd>{% if n %}<a href="#plan">{{ n }}</a>{% else %}0{% endif %}</dd>
+        </div>
+      {% endfor %}
+    </dl>
 
     <div class="actions">
       {% for fmt in ['pdf', 'json', 'sarif'] %}
@@ -75,6 +119,14 @@
   </div>
 </section>
 
+<nav class="report-nav no-print" aria-label="{{ _('Parts of the report') }}">
+  <a href="#plan">{{ _('Action plan') }}</a>
+  <a href="#conformance">{{ _('Conformance') }}</a>
+  <a href="#controls">{{ _('Control by control') }}</a>
+  <a href="#server">{{ _('What the server accepts') }}</a>
+  <a href="#findings">{{ _('Findings') }}</a>
+</nav>
+
 {% if not obs.complete or obs.notes %}
   <div class="note caution">
     {% if not obs.complete %}
@@ -89,35 +141,18 @@
   <h2>{{ _('What to do, in this order') }}</h2>
   {% if actions %}
     <p class="quiet">{{ _('Each step groups everything the standards say about one topic. Critical and high come from the rating, which only uses points all standards agree on; medium is required by at least one standard; low is a recommendation or only a matter of an approved list.') }}</p>
-    <ol class="plan">
-      {% for a in actions %}
-        <li class="sheet step-{{ a.priority }}">
-          <div class="plan-head">
-            <span class="prio prio-{{ a.priority }}">{{ _(priority_text[a.priority]) }}</span>
-            <h3>{{ _(a.title) }}</h3>
-            {% if a.rating_cap %}<span class="tag">{{ _('Caps the rating at %(grade)s.', grade=a.rating_cap) }}</span>{% endif %}
-          </div>
-          <p>{{ _(a.reason) }}</p>
-          {% if a.affected %}
-            <p class="small quiet">{{ _('Affects:') }}
-              {% for x in a.affected %}<a href="#{{ x.standard_id }}">{{ x.standard }}</a> ({{ _('required') if x.status == 'fail' else _('recommended') }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
-          {% endif %}
-          {% if a.off_list_only %}<p class="small"><span class="tag warn">{{ _('approved list only') }}</span> {{ _('Needed only for conformity with an approved list; the current choice is not weak.') }}</p>{% endif %}
-          {% if a.evidence %}
-            <p class="small"><strong>{{ _('Found:') }}</strong> <span class="code">{{ a.evidence[:8]|join(', ') }}</span>{% if a.evidence|length > 8 %} <span class="quiet">{{ _('and %(n)s more', n=a.evidence|length - 8) }}</span>{% endif %}</p>
-          {% endif %}
-          {% if a.same_as %}
-            <p class="small quiet">{{ _('Same configuration as action %(n)s.', n=a.same_as) }}</p>
-          {% elif a.snippets %}
-            <div class="snippets">
-              {% for server, lines in a.snippets.items() %}
-                <figure><figcaption>{{ server }}</figcaption><pre><code>{{ lines|join('\n') }}</code></pre></figure>
-              {% endfor %}
-            </div>
-          {% endif %}
-        </li>
-      {% endfor %}
-    </ol>
+    {% set main = actions|rejectattr('priority', 'equalto', 'low')|list %}
+    {% set minor = actions|selectattr('priority', 'equalto', 'low')|list %}
+    {% if main %}
+      <ol class="plan">{% for a in main %}{{ step(a, loop.index) }}{% endfor %}</ol>
+    {% endif %}
+    {% if minor %}
+      <details class="minor"{% if not main %} open{% endif %}>
+        <summary><strong>{{ _('Low priority') }}: {{ _('1 step') if minor|length == 1 else _('%(n)s steps', n=minor|length) }}</strong>
+          <span class="quiet">{{ _('Recommendations, and points that only matter for an approved list.') }}</span></summary>
+        <ol class="plan">{% for a in minor %}{{ step(a, main|length + loop.index) }}{% endfor %}</ol>
+      </details>
+    {% endif %}
   {% else %}
     <p class="note">{{ _('No weakness found.') }}</p>
   {% endif %}
@@ -139,7 +174,7 @@
   </details>
 </section>
 
-<section>
+<section id="conformance">
   <h2>{{ _('Conformance') }}</h2>
   <p class="quiet">{{ _('The rating above is this tool’s own summary. The verdicts below follow each standard’s own wording: what it requires is a failure when missing, what it recommends is a warning.') }}</p>
   <div class="sheet scroll">
@@ -162,22 +197,29 @@
   </div>
 </section>
 
-<section>
+<section id="controls">
   <h2>{{ _('Control by control') }}</h2>
-  <p class="quiet">{{ _('One row per topic. A dot means the standard has no rule for it.') }}</p>
+  <p class="quiet">{{ _('One row per topic, one column per standard.') }}</p>
+  <ul class="legend-row small">
+    <li><span class="stamp pass bare">{{ _('Met') }}</span></li>
+    <li><span class="stamp warn bare">{{ _('Warning') }}</span></li>
+    <li><span class="stamp fail bare">{{ _('Not met') }}</span></li>
+    <li><span class="quiet">–</span> {{ _('not applicable to this server') }}</li>
+    <li><span class="quiet">·</span> {{ _('the standard has no rule for it') }}</li>
+  </ul>
   <div class="sheet scroll">
     <table class="matrix">
-      <thead><tr><th>{{ _('Topic') }}</th>{% for s in r.comparison.standards %}<th>{{ s }}</th>{% endfor %}</tr></thead>
+      <thead><tr><th>{{ _('Topic') }}</th>{% for s in r.comparison.standards %}<th>{{ s|replace('-', '‑') }}</th>{% endfor %}</tr></thead>
       <tbody>
         {% for row in r.comparison.rows %}
-          <tr><td>{{ _(row.label) }}</td>{% for c in row.cells %}<td>{{ status(c, bare=true) }}</td>{% endfor %}</tr>
+          <tr><td>{{ _(row.label) }}</td>{% for c in row.cells %}<td{% if c in ['fail', 'warn'] %} class="cell-{{ c }}"{% endif %}>{{ status(c, bare=true) }}</td>{% endfor %}</tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
 
-<section>
+<section id="server">
   <h2>{{ _('What the server accepts') }}</h2>
   <div class="columns">
     <div class="sheet">
@@ -239,13 +281,19 @@
   {% endfor %}
 </section>
 
-<section>
+<section id="findings">
   <h2>{{ _('Findings') }}</h2>
+  <p class="quiet">{{ _('Every rule of every standard, with the value found, the fix and the source. The action plan above already groups them; open a standard for the details.') }}
+    {% if r.evaluations|selectattr('off_list_only')|list or actions|selectattr('off_list_only')|list %}{{ _('Marked “approved list only”: the value is considered sound by other standards, but this one only accepts what is on its own list.') }}{% endif %}</p>
   {% if lang != 'en' %}<p class="quiet small">{{ _('Rule texts and references are quoted from the standards and stay in English.') }}</p>{% endif %}
   {% for ev in r.evaluations %}
     {% set problems = ev.findings|selectattr('status', 'in', ['fail', 'warn', 'inconclusive'])|list %}
-    <details class="sheet" id="{{ ev.standard.id }}"{% if problems %} open{% endif %}>
-      <summary>{{ ev.standard.title }} <span class="quiet small">({{ _('%(n)s to review', n=problems|length) }})</span></summary>
+    <details class="sheet standard" id="{{ ev.standard.id }}">
+      <summary>
+        <span class="std-title">{{ ev.standard.title }}</span>
+        <span class="std-result">{{ verdict(ev.verdict) }}
+          <span class="quiet small">{% if ev.counts.fail %}{{ _('%(n)s not met', n=ev.counts.fail) }}{% if ev.counts.warn %}, {% endif %}{% endif %}{% if ev.counts.warn %}{{ _('1 warning') if ev.counts.warn == 1 else _('%(n)s warnings', n=ev.counts.warn) }}{% endif %}</span></span>
+      </summary>
       {% if ev.standard.transcription == 'draft' %}
         <p class="note caution small">{{ _('Draft transcription: these rules still await a line-by-line review against the official document.') }}</p>
       {% endif %}
@@ -260,7 +308,6 @@
           </div>
           {% if f.status != 'pass' %}
             <p>{{ f.message }}</p>
-            {% if f.off_list_only %}<p class="small quiet">{{ _('These values are considered sound by other standards. This one only accepts what is on its own list.') }}</p>{% endif %}
             {% if f.evidence %}
               <ul class="evidence">{% for e in f.evidence[:12] %}<li class="code">{{ e }}</li>{% endfor %}
                 {% if f.evidence|length > 12 %}<li class="quiet">{{ _('and %(n)s more', n=f.evidence|length - 12) }}</li>{% endif %}

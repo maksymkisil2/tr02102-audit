@@ -37,6 +37,7 @@ def test_translated_pdf() -> None:
 
     assert pdf.build(report.build(observation("tls-typical"), STANDARDS), tr).startswith(b"%PDF")
     assert "TLS audit report" in seen and "What to do, in this order" in seen
+    assert "Standards met" in seen and "Required by:" in seen
 
 
 def test_hostile_server_fields_cannot_inject_markup() -> None:

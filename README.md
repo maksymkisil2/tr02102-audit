@@ -179,7 +179,7 @@ A hosted scanner parses data from servers it does not control, holds accounts, a
 
 ## Quality
 
-- 223 tests: end-to-end scans of real OpenSSL servers, hostile input for every parser, the web interface (roles, CSRF, SSRF, limits, session handling, languages), schema upgrades, PDF output and the action plan, whose cipher lists are checked against OpenSSL.
+- 226 tests: end-to-end scans of real OpenSSL servers, hostile input for every parser, the web interface (roles, CSRF, SSRF, limits, session handling, languages), schema upgrades, PDF output and the action plan, whose cipher lists are checked against OpenSSL.
 - In CI the lab's web interface is built from the commit and used end to end, the way a person would: sign in, check, download a PDF, check again, compare.
 - The storage and web tests run on SQLite and again on PostgreSQL in CI.
 - CI on every push: Ruff (with security rules), mypy in strict mode, pytest, SARIF output validated against the official schema, a Docker Compose lab whose servers are scanned by the CLI, and a container build that is started and signed in to.

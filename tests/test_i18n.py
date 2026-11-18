@@ -25,6 +25,7 @@ INDIRECT = [
     # action plan, comparison, report formats, audit-log signals
     *(text for pair in advice.ACTION_TEXT.values() for text in pair),
     *advice.PRIORITY_TEXT.values(),
+    *advice.ROLE_TEXT.values(),
     *(text for pair in advice.PROFILE_TEXT.values() for text in pair),
     *(label for label, _ in (*compare._LISTS, *compare._VALUES)),
     *reporting.FORMATS.values(),

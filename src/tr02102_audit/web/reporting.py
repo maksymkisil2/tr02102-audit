@@ -34,6 +34,8 @@ def context(rep: dict[str, Any]) -> dict[str, Any]:
         "profiles": {name: advice.configuration(name) for name in advice.PROFILE_TEXT},
         "profile_text": advice.PROFILE_TEXT,
         "priority_text": advice.PRIORITY_TEXT,
+        "priorities": advice.PRIORITIES,
+        "role_text": advice.ROLE_TEXT,
     }
 
 

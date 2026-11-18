@@ -49,10 +49,19 @@ TINT = colors.HexColor("#eef0f7")
 GOOD = colors.HexColor("#2e7d4f")
 BAD = colors.HexColor("#b3261e")
 WARN = colors.HexColor("#9a5b00")
+FAIR = colors.HexColor("#56780f")
+GOOD_BG = colors.HexColor("#e2f3ec")
+BAD_BG = colors.HexColor("#fbe7e5")
+WARN_BG = colors.HexColor("#fbefd5")
 
-_GRADE_COLOUR = {"A+": GOOD, "A": GOOD, "B": WARN, "C": WARN, "F": BAD}
+_GRADE_COLOUR = {"A+": GOOD, "A": GOOD, "B": FAIR, "C": WARN, "F": BAD}
 _PRIORITY_COLOUR = {"critical": BAD, "high": BAD, "medium": WARN, "low": QUIET}
 _STATUS_COLOUR = {"pass": GOOD, "fail": BAD, "warn": WARN}
+_STATUS_TINT = {"fail": BAD_BG, "warn": WARN_BG}
+_VERDICT_TINT = {"pass": GOOD_BG, "pass_with_warnings": WARN_BG, "fail": BAD_BG}
+_VERDICT_COLOUR = {"pass": GOOD, "pass_with_warnings": WARN, "fail": BAD}
+# The frame of SimpleDocTemplate keeps 6 pt of padding on each side.
+_FRAME_PADDING = 12
 
 
 def _english(text: str, **params: Any) -> str:
@@ -96,6 +105,13 @@ def _styles() -> dict[str, ParagraphStyle]:
         "mono": ParagraphStyle(
             "mono", parent=base, fontName=mono, fontSize=7, leading=9.2, textColor=INK
         ),
+        "figure": ParagraphStyle(
+            "figure", parent=base, fontName=bold, fontSize=17, leading=20, textColor=INK
+        ),
+        "figure0": ParagraphStyle("figure0", parent=base, fontSize=17, leading=20, textColor=QUIET),
+        "lead": ParagraphStyle("lead", parent=base, fontSize=10, leading=14),
+        "tiny": ParagraphStyle("tiny", parent=base, fontSize=6.8, leading=8.6),
+        "tinyb": ParagraphStyle("tinyb", parent=base, fontName=bold, fontSize=6.8, leading=8.6),
         "tag": ParagraphStyle(
             "tag",
             parent=base,
@@ -193,7 +209,7 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
     rate = report["rating"]
     actions = advice.plan(report)
     numbers = advice.summary(report, actions)
-    width = A4[0] - 36 * mm
+    width = A4[0] - 36 * mm - _FRAME_PADDING
     where = f"{target['host']}:{target['port']}"
 
     story: list[Any] = []
@@ -244,55 +260,34 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
             )
         )
 
-    # ---------------------------------------------------------------- summary
-    story.append(_p(tr("Summary"), st["h1"]))
-    if rate.get("grade"):
-        story.append(
-            _p(
-                tr(
-                    "Rating %(grade)s. %(met)s of %(all)s standards met.",
-                    grade=rate["grade"],
-                    met=numbers["conform"],
-                    all=numbers["standards"],
-                ),
-                st["base"],
-            )
-        )
+    # -------------------------------------------------------------- at a glance
+    story.append(_tally(rate.get("grade"), numbers, st, width, tr))
+    story.append(Spacer(1, 8))
+    if rate.get("reasons"):
+        story.append(_p(tr("Why the rating is not better:"), st["h2"]))
+        story.append(Spacer(1, 2))
+        story.append(_reasons(rate["reasons"], st, width, tr))
+    elif rate.get("grade"):
+        line = "<b>" + escape(tr("No weakness found.")) + "</b>"
+        if rate.get("bonus_missing"):
+            missing = "; ".join(tr(b["title"]) for b in rate["bonus_missing"])
+            line += " " + escape(tr("An A+ would also need:") + " " + missing) + "."
+        story.append(Paragraph(line, st["lead"]))
     else:
         story.append(
             _p(
                 tr("Not rated.")
                 + " "
                 + tr(
-                    "%(met)s of %(all)s standards met.",
-                    met=numbers["conform"],
-                    all=numbers["standards"],
+                    "The check left something open, and an unknown is never counted as good. On what was measured the rating would be %(grade)s at best.",
+                    grade=rate.get("at_best"),
                 ),
-                st["base"],
+                st["lead"],
             )
         )
-    counts = numbers["actions"]
-    story.append(
-        _p(
-            tr(
-                "Actions: %(critical)s critical, %(high)s high, %(medium)s medium, %(low)s low.",
-                **counts,
-            ),
-            st["base"],
-        )
-    )
-    if numbers["off_list_only"]:
-        story.append(
-            _p(
-                tr(
-                    "%(n)s standards fail only because of their approved lists; no weak algorithm was found there.",
-                    n=numbers["off_list_only"],
-                ),
-                st["base"],
-            )
-        )
-    story.append(Spacer(1, 5))
 
+    # ------------------------------------------------------------ conformance
+    story.append(_p(tr("Conformance"), st["h1"]))
     rows: list[list[Any]] = [
         [
             _p(tr("Standard"), st["cellb"]),
@@ -301,20 +296,37 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
             _p(tr("Warnings"), st["cellb"]),
         ]
     ]
-    for ev in report["evaluations"]:
-        verdict = _verdict_text(ev["verdict"], tr)
+    tints: list[tuple[Any, ...]] = []
+    for index, ev in enumerate(report["evaluations"], 1):
+        verdict = [
+            Paragraph(
+                f'<font color="{_VERDICT_COLOUR.get(ev["verdict"], QUIET).hexval()}">'
+                f"{escape(_verdict_text(ev['verdict'], tr))}</font>",
+                st["cellb"],
+            )
+        ]
         if ev.get("off_list_only"):
-            verdict += " (" + tr("approved list only") + ")"
-        colour = GOOD if ev["verdict"].startswith("pass") else BAD
+            verdict.append(
+                _p(tr("Only because of its approved list; no weak algorithm found."), st["small"])
+            )
         rows.append(
             [
-                _p(f"{ev['standard']['short_name']} ({ev['standard']['edition']})", st["cell"]),
-                Paragraph(f'<font color="{colour.hexval()}">{escape(verdict)}</font>', st["cellb"]),
+                Paragraph(
+                    f"<b>{escape(ev['standard']['short_name'])}</b> "
+                    f'<font color="{QUIET.hexval()}">{escape(ev["standard"]["edition"])}</font>',
+                    st["cell"],
+                ),
+                verdict,
                 _p(ev["counts"]["fail"], st["cell"]),
                 _p(ev["counts"]["warn"], st["cell"]),
             ]
         )
-    story.append(_grid(rows, (width * 0.38, width * 0.32, width * 0.17, width * 0.13)))
+        tint = _VERDICT_TINT.get(ev["verdict"])
+        if tint is not None:
+            tints.append(("BACKGROUND", (1, index), (1, index), tint))
+    table = _grid(rows, (width * 0.36, width * 0.36, width * 0.16, width * 0.12))
+    table.setStyle(TableStyle(tints))
+    story.append(table)
     story.append(Spacer(1, 4))
     story.append(
         _p(
@@ -324,12 +336,6 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
             st["small"],
         )
     )
-
-    if rate.get("reasons"):
-        story.append(Spacer(1, 4))
-        story.append(_p(tr("Why the rating is not better:"), st["h2"]))
-        for reason in rate["reasons"]:
-            story.append(_p(f"{reason['grade']}  {tr(reason['title'])}", st["cell"]))
 
     # ------------------------------------------------------------ action plan
     story.append(CondPageBreak(60 * mm))
@@ -368,22 +374,45 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
         story.append(CondPageBreak(60 * mm))
         story.append(_p(tr("Control by control"), st["h1"]))
         names = comparison["standards"]
-        head_row = [_p(tr("Topic"), st["cellb"])] + [_p(n, st["cellb"]) for n in names]
+        # A non-breaking hyphen keeps "TR-02102-2" in one piece in a narrow column.
+        head_row = [_p(tr("Topic"), st["tinyb"])] + [
+            _p(n.replace("-", "\u2011"), st["tinyb"]) for n in names
+        ]
         grid_rows: list[list[Any]] = [head_row]
-        for row in comparison["rows"]:
+        tints.clear()
+        for index, row in enumerate(comparison["rows"], 1):
             cells = [_p(tr(row["label"]), st["cell"])]
-            for status in row["cells"]:
+            for column, status in enumerate(row["cells"], 1):
                 colour = _STATUS_COLOUR.get(status or "", QUIET)
+                text = "–" if status == "not_applicable" else _status_text(status, tr)
                 cells.append(
                     Paragraph(
-                        f'<font color="{colour.hexval()}">{escape(_status_text(status, tr))}</font>',
-                        st["cell"],
+                        f'<font color="{colour.hexval()}">{escape(text)}</font>',
+                        st["cellb"] if status in ("fail", "warn") else st["cell"],
                     )
                 )
+                if status in _STATUS_TINT:
+                    tints.append(
+                        ("BACKGROUND", (column, index), (column, index), _STATUS_TINT[status])
+                    )
             grid_rows.append(cells)
-        first = width * 0.3
+        first = width * 0.22
         rest = (width - first) / max(1, len(names))
-        story.append(_grid(grid_rows, (first, *([rest] * len(names)))))
+        matrix = _grid(grid_rows, (first, *([rest] * len(names))))
+        matrix.setStyle(TableStyle(tints))
+        story.append(
+            _p(
+                tr("One row per topic, one column per standard.")
+                + " – "
+                + tr("not applicable to this server")
+                + "; · "
+                + tr("the standard has no rule for it")
+                + ".",
+                st["small"],
+            )
+        )
+        story.append(Spacer(1, 3))
+        story.append(matrix)
 
     # ------------------------------------------------------- measured facts
     story.append(CondPageBreak(60 * mm))
@@ -456,7 +485,7 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
                 _p(tr("No certificate could be retrieved."), st["cell"]),
             ]
         )
-    story.append(_grid(fact_rows, (width * 0.3, width * 0.7), header=False))
+    story.append(_grid(fact_rows, (width * 0.34, width * 0.66), header=False))
 
     # --------------------------------------------------------------- findings
     for ev in report["evaluations"]:
@@ -467,12 +496,22 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
         story.append(CondPageBreak(40 * mm))
         story.append(_p(f"{std['short_name']} · {_verdict_text(ev['verdict'], tr)}", st["h1"]))
         story.append(_p(f"{std['title']} · {std['edition']}", st["small"]))
+        if any(f.get("off_list_only") for f in open_findings):
+            story.append(
+                _p(
+                    tr(
+                        "Marked “approved list only”: the value is considered sound by other standards, but this one only accepts what is on its own list."
+                    ),
+                    st["small"],
+                )
+            )
         story.append(Spacer(1, 3))
         if not open_findings:
             story.append(
                 _p(tr("Every requirement and recommendation of this standard is met."), st["base"])
             )
             continue
+        tints.clear()
         rows = [
             [
                 _p(tr("Rule"), st["cellb"]),
@@ -488,16 +527,15 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
                 if len(f["evidence"]) > 6:
                     shown += " " + tr("and %(n)s more", n=len(f["evidence"]) - 6)
                 detail.append(_p(shown, st["mono"]))
-            if f.get("off_list_only"):
-                detail.append(
-                    _p(
-                        tr("Only because of its approved list; no weak algorithm found."),
-                        st["small"],
-                    )
-                )
             detail.append(_p(tr("Fix:") + " " + f["remediation"], st["small"]))
             detail.append(_p(f["reference"], st["small"]))
             level = tr("required") if f.get("level") == "required" else tr("recommended")
+            if f.get("off_list_only"):
+                level += ", " + tr("approved list only")
+            if f["status"] in _STATUS_TINT:
+                tints.append(
+                    ("BACKGROUND", (1, len(rows)), (1, len(rows)), _STATUS_TINT[f["status"]])
+                )
             rows.append(
                 [
                     _p(f["rule_id"], st["cell"]),
@@ -512,7 +550,9 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
                     detail,
                 ]
             )
-        story.append(_grid(rows, (width * 0.16, width * 0.16, width * 0.68)))
+        table = _grid(rows, (width * 0.15, width * 0.17, width * 0.68))
+        table.setStyle(TableStyle(tints))
+        story.append(table)
 
     # ------------------------------------------------------- method and limits
     story.append(CondPageBreak(50 * mm))
@@ -588,55 +628,168 @@ def _action(
     width: float,
     tr: Translate,
 ) -> KeepTogether:
+    """One step of the plan, with a bar in its priority colour down the left."""
     colour = _PRIORITY_COLOUR[action["priority"]]
-    tag = Table(
-        [[Paragraph(escape(_priority_text(action["priority"], tr)), st["tag"])]],
-        colWidths=(22 * mm,),
+    inner = width - 9
+    head = (
+        f'<font color="{colour.hexval()}">{escape(_priority_text(action["priority"], tr).upper())}</font>'
+        f"  {number}. {escape(tr(action['title']))}"
     )
-    tag.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, -1), colour),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-            ]
-        )
-    )
-    title = Table(
-        [[tag, _p(f"{number}. {tr(action['title'])}", st["h2"])]],
-        colWidths=(25 * mm, width - 25 * mm),
-    )
-    title.setStyle(
-        TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)])
-    )
-    parts: list[Any] = [Spacer(1, 5), title, Spacer(1, 2), _p(tr(action["reason"]), st["base"])]
-    facts = []
+    parts: list[Any] = [
+        Paragraph(head, st["h2"]),
+        Spacer(1, 2),
+        _p(tr(action["reason"]), st["base"]),
+    ]
+    notes = []
     if action["rating_cap"]:
-        facts.append(tr("Caps the rating at %(grade)s.", grade=action["rating_cap"]))
-    if action["affected"]:
-        names = ", ".join(
-            f"{a['standard']} ({tr('required') if a['status'] == 'fail' else tr('recommended')})"
-            for a in action["affected"]
-        )
-        facts.append(tr("Affects: %(names)s.", names=names))
+        notes.append(tr("Caps the rating at %(grade)s.", grade=action["rating_cap"]))
     if action["off_list_only"]:
-        facts.append(
+        notes.append(
             tr("Needed only for conformity with an approved list; the current choice is not weak.")
         )
-    for line in facts:
-        parts.append(_p(line, st["small"]))
+    if notes:
+        parts.append(_p(" ".join(notes), st["small"]))
+    facts: list[list[Any]] = []
     if action["evidence"]:
         shown = ", ".join(action["evidence"][:8])
         if len(action["evidence"]) > 8:
             shown += " " + tr("and %(n)s more", n=len(action["evidence"]) - 8)
-        parts.append(_p(tr("Found:") + " " + shown, st["mono"]))
+        facts.append([_p(tr("Found:"), st["cellb"]), _p(shown, st["mono"])])
+    for status, label in advice.ROLE_TEXT.items():
+        names = [a["standard"] for a in action["affected"] if a["status"] == status]
+        if names:
+            facts.append([_p(tr(label), st["cellb"]), _p(", ".join(names), st["cell"])])
+    if facts:
+        table = Table(facts, colWidths=(34 * mm, inner - 34 * mm), hAlign="LEFT")
+        table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                ]
+            )
+        )
+        parts += [Spacer(1, 3), table]
     if action.get("same_as"):
         parts.append(
             _p(tr("Same configuration as action %(n)s.", n=action["same_as"]), st["small"])
         )
-    for server, lines in ({} if action.get("same_as") else action["snippets"]).items():
-        if lines:
-            parts.append(Spacer(1, 2))
-            parts.append(_p(server, st["small"]))
-            parts.append(_code(lines, st, width))
-    return KeepTogether(parts)
+    else:
+        snippets = [(server, lines) for server, lines in action["snippets"].items() if lines]
+        if snippets:
+            parts.append(Spacer(1, 4))
+            parts.append(_snippets(snippets, st, inner))
+    box = Table([[parts]], colWidths=(width,))
+    box.setStyle(
+        TableStyle(
+            [
+                ("LINEBEFORE", (0, 0), (0, 0), 3, colour),
+                ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    return KeepTogether([Spacer(1, 7), box])
+
+
+def _snippets(
+    snippets: Sequence[tuple[str, Sequence[str]]],
+    st: Mapping[str, ParagraphStyle],
+    width: float,
+) -> Table:
+    """Configuration blocks; nginx and Apache side by side."""
+    gap = 6
+    column = (width - gap * (len(snippets) - 1)) / len(snippets)
+    cells: list[Any] = []
+    widths: list[float] = []
+    for index, (server, lines) in enumerate(snippets):
+        if index:
+            cells.append("")
+            widths.append(gap)
+        cells.append([_p(server, st["small"]), _code(lines, st, column)])
+        widths.append(column)
+    table = Table([cells], colWidths=widths, hAlign="LEFT")
+    table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    return table
+
+
+def _tally(
+    grade: str | None,
+    numbers: Mapping[str, Any],
+    st: Mapping[str, ParagraphStyle],
+    width: float,
+    tr: Translate,
+) -> Table:
+    """The key figures: rating, standards met, steps by priority."""
+    cells = [
+        (tr("Rating"), grade or "–", _GRADE_COLOUR.get(grade or "", QUIET), True),
+        (
+            tr("Standards met"),
+            tr("%(met)s of %(all)s", met=numbers["conform"], all=numbers["standards"]),
+            INK,
+            True,
+        ),
+    ]
+    for priority in advice.PRIORITIES:
+        count = numbers["actions"][priority]
+        colour = _PRIORITY_COLOUR[priority] if count else RULE
+        cells.append((_priority_text(priority, tr), str(count), colour, bool(count)))
+    row = [
+        [_p(label, st["small"]), _p(value, st["figure"] if strong else st["figure0"])]
+        for label, value, _, strong in cells
+    ]
+    first = width * 0.14
+    second = width * 0.2
+    rest = (width - first - second) / 4
+    table = Table([row], colWidths=(first, second, rest, rest, rest, rest))
+    style: list[tuple[Any, ...]] = [
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]
+    for column, (_, _, colour, _) in enumerate(cells):
+        style.append(("LINEABOVE", (column, 0), (column, 0), 2.4, colour))
+    table.setStyle(TableStyle(style))
+    return table
+
+
+def _reasons(
+    reasons: Sequence[Mapping[str, Any]],
+    st: Mapping[str, ParagraphStyle],
+    width: float,
+    tr: Translate,
+) -> Table:
+    """Why the rating is not better: one line per cap, with the grade it sets."""
+    rows = []
+    style: list[tuple[Any, ...]] = [
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+    ]
+    for index, reason in enumerate(reasons):
+        title = tr(reason["title"])
+        if reason.get("detail"):
+            title += f" ({reason['detail']})"
+        rows.append([_p(reason["grade"], st["tag"]), _p(title, st["base"])])
+        colour = _GRADE_COLOUR.get(reason["grade"], QUIET)
+        style.append(("BACKGROUND", (0, index), (0, index), colour))
+        style.append(("LEFTPADDING", (1, index), (1, index), 7))
+    table = Table(rows, colWidths=(7 * mm, width - 7 * mm), hAlign="LEFT")
+    table.setStyle(TableStyle(style))
+    return table

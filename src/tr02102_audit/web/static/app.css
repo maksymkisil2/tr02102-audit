@@ -229,6 +229,10 @@ tr.group:first-child > th { padding-top: 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .matrix th:not(:first-child), .matrix td:not(:first-child) { text-align: center; padding-right: 12px; }
 .matrix th { white-space: normal; min-width: 92px; }
+.matrix td.cell-fail { background: var(--bad-bg); }
+.matrix td.cell-warn { background: var(--warn-bg); }
+.matrix td:first-child { padding-left: 8px; }
+.matrix th:first-child { padding-left: 8px; }
 .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; }
 .facts dt { color: var(--ink-2); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
@@ -245,7 +249,26 @@ tr.group:first-child > th { padding-top: 0; }
 /* ----------------------------------------------------------- action plan */
 /* Priority reads from the left edge of each step, the way a stamped margin
    mark reads on a paper report. */
-.summary-line { margin: 10px 0 0; font-weight: 600; }
+/* Key figures of a report: standards met, then steps by priority. A zero
+   stays grey, so the eye goes to what needs work. */
+.tally { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)); gap: 0; margin: 16px 0 0; max-width: 640px; }
+.tally > div { border-top: 3px solid var(--p, var(--ink)); padding: 6px 12px 0 0; }
+.tally dt { font-size: .8rem; color: var(--ink-2); white-space: nowrap; }
+.tally dd { margin: 0; font: 700 1.5rem/1.2 var(--display); font-variant-numeric: tabular-nums; }
+.tally dd a { color: inherit; text-decoration: none; }
+.tally dd a:hover { text-decoration: underline; }
+.tally-critical, .tally-high { --p: var(--bad); }
+.tally-medium { --p: var(--warn); }
+.tally-low { --p: var(--none); }
+.tally .zero { --p: var(--line); }
+.tally .zero dd { color: var(--ink-2); font-weight: 400; }
+
+/* In-page navigation; it stays at the top while the long report scrolls. */
+.report-nav { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 18px 0 0; padding: 10px 2px; background: var(--page); border-bottom: 1px solid var(--line); font-size: .95rem; }
+.report-nav a { text-decoration: none; font-weight: 600; white-space: nowrap; }
+.report-nav a:hover { text-decoration: underline; }
+section[id] { scroll-margin-top: 56px; }
+.report-nav + .note { margin-top: 16px; }
 .plan { list-style: none; margin: 0; padding: 0; counter-reset: plan; }
 .plan > li { counter-increment: plan; border-left: 6px solid var(--p); padding-top: 18px; }
 .plan > .sheet + .sheet { margin-top: 12px; }
@@ -254,7 +277,23 @@ tr.group:first-child > th { padding-top: 0; }
 .step-low { --p: var(--none); }
 .plan-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-bottom: 6px; }
 .plan-head h3 { margin: 0; font-size: 1.2rem; }
-.plan .plan-head h3::before { content: counter(plan) ". "; color: var(--ink-2); }
+.step-no { color: var(--ink-2); }
+.step-reason { margin: 0 0 8px; }
+.step-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 8px 0 0; }
+.step-facts dt { font-weight: 700; }
+.step-facts dd { margin: 0; max-width: none; }
+.affects { display: flex; flex-wrap: wrap; gap: 2px 14px; align-items: baseline; }
+details.minor { margin-top: 12px; }
+details.minor > summary { cursor: pointer; padding: 12px 0; display: list-item; }
+details.minor > summary .quiet { margin-left: 6px; }
+details.minor[open] > summary { margin-bottom: 4px; }
+.legend-row { display: flex; flex-wrap: wrap; gap: 4px 22px; list-style: none; margin: 0 0 10px; padding: 0; }
+details.standard > summary { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; justify-content: space-between; list-style: none; }
+details.standard > summary::-webkit-details-marker { display: none; }
+details.standard > summary::before { content: "▸"; color: var(--ink-2); margin-right: -8px; }
+details.standard[open] > summary::before { content: "▾"; }
+.std-title { flex: 1 1 320px; }
+.std-result { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font: 400 1rem var(--body); }
 .prio { font: 700 .78rem var(--display); letter-spacing: .05em; text-transform: uppercase; color: var(--surface); background: var(--p, var(--none)); border-radius: 3px; padding: 2px 8px; }
 .prio-critical, .prio-high { --p: var(--bad); }
 .prio-medium { --p: var(--warn); }
@@ -367,6 +406,11 @@ tr.flagged > td:first-child { box-shadow: inset 4px 0 0 var(--bad); padding-left
   .facts { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .facts dd { margin-bottom: 8px; }
   .specimen td { padding: 9px 14px; }
+  .tally { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tally-standards { grid-column: 1 / -1; margin-bottom: 8px; }
+  .report-nav { position: static; gap: 4px 16px; }
+  .step-facts { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .step-facts dd { margin-bottom: 6px; }
 }
 
 @media print {
@@ -378,4 +422,5 @@ tr.flagged > td:first-child { box-shadow: inset 4px 0 0 var(--bad); padding-left
   a { color: inherit; text-decoration: none; }
   .finding, tr, .plan > li { break-inside: avoid; }
   .plan > li { border-left-width: 4px; padding-left: 12px; }
+  .report-nav { display: none; }
 }

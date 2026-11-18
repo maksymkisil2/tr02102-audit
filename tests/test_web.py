@@ -826,6 +826,29 @@ def test_demo_reports_come_as_pdf_too(client: FlaskClient) -> None:
     assert client.get("/demo/tls-typical.exe").status_code == 404
 
 
+def test_report_page_leads_with_figures_and_folds_the_details(client: FlaskClient) -> None:
+    html = text(client.get("/demo/tls-typical"))
+    # Key figures first, then a way to jump to each part.
+    assert 'class="tally"' in html and "Standards met" in html
+    assert 'class="report-nav' in html and 'href="#findings"' in html
+    # Steps that need work stay open; low-priority ones are folded together.
+    assert html.index("Use a stronger certificate key") < html.index("Low priority")
+    assert "Required by:" in html
+    # Findings per standard start folded, each with its verdict in the summary line.
+    assert '<details class="sheet standard"' in html
+    assert '<details class="sheet standard" id="bsi-tr-02102-2" open' not in html
+    assert "not applicable to this server" in html
+    assert "1 warnings" not in html
+
+
+def test_server_without_main_steps_shows_the_low_ones_open(client: FlaskClient) -> None:
+    # With the default standards the hardened lab server only lacks post-quantum
+    # key exchange, a low-priority step; folding it away would hide the whole plan.
+    html = text(client.get("/demo/tls-good"))
+    assert '<details class="minor" open>' in html
+    assert "Add hybrid post-quantum key exchange" in html
+
+
 def test_keeping_a_server_checking_it_again_and_comparing(app: Flask) -> None:
     client = user_client(app)
     first = start_scan(client, keep="yes", label="Lab nginx").headers["Location"]
