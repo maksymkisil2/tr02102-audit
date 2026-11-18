@@ -13,24 +13,26 @@ set -eu
 OUT="${OUT:-/certs}"
 DAYS="${DAYS:-30}"
 
-if [ -f "$OUT/.done" ]; then
-    echo "lab certificates already present in $OUT"
-    exit 0
-fi
-
 mkdir -p "$OUT"
 
+# Each file is created only if it is missing, so a lab that was started
+# before a new target existed gets that target's certificate on the next run.
+if [ ! -f "$OUT/lab-ca.crt" ]; then
 openssl req -x509 -noenc -days "$DAYS" \
     -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
     -keyout "$OUT/lab-ca.key" -out "$OUT/lab-ca.crt" \
     -subj "/O=tr02102-audit test lab/CN=Lab Root CA (not for production)" \
     -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
     -addext "keyUsage=critical,keyCertSign,cRLSign"
+fi
 
 # issue <name> <openssl key options...>
 issue() {
     name="$1"
     shift
+    if [ -f "$OUT/$name.crt" ]; then
+        return 0
+    fi
     openssl req -x509 -noenc -days "$DAYS" "$@" \
         -CA "$OUT/lab-ca.crt" -CAkey "$OUT/lab-ca.key" \
         -keyout "$OUT/$name.key" -out "$OUT/$name.crt" \
@@ -47,6 +49,9 @@ issue tls-good -newkey ec -pkeyopt ec_paramgen_curve:prime256v1
 issue tls-typical -newkey rsa:2048
 # tls-weak: 2048-bit RSA as well; its weaknesses are in the protocol settings.
 issue tls-weak -newkey rsa:2048
+# my-site: your own server to practise on; RSA 2048 like most websites.
+issue my-site -newkey rsa:2048
 
-touch "$OUT/.done"
-echo "lab certificates written to $OUT"
+# Certificates are public; the web service reads the CA as an unprivileged user.
+chmod 644 "$OUT"/*.crt
+echo "lab certificates ready in $OUT"

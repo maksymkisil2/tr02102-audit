@@ -106,6 +106,14 @@ jobs:
       - name: Start the lab and verify all targets
         run: docker compose -f lab/docker-compose.yml run --rm smoke
 
+      # The web interface as it runs on a laptop: built from this commit,
+      # allowed to check the lab network, trusting the lab CA.
+      - name: Start the web interface and the practice server
+        run: docker compose -f lab/docker-compose.yml up -d --build --wait web my-site
+
+      - name: Use the web interface end to end
+        run: python lab/scripts/web-e2e.py
+
       - name: Install the scanner
         run: python -m pip install -r requirements.txt .
 
