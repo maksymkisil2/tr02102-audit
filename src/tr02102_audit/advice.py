@@ -68,6 +68,11 @@ ACTION_TEXT: dict[str, tuple[str, str]] = {
         "SSL 3.0, TLS 1.0 and TLS 1.1 have known weaknesses and are rejected by every "
         "standard here. Clients from the last ten years speak TLS 1.2.",
     ),
+    "tls13-only": (
+        "Offer only TLS 1.3",
+        "Only Mozilla's Modern profile asks for this. Clients older than Android 10, "
+        "Chrome 70 or Java 11 can then no longer connect, so most public sites keep TLS 1.2.",
+    ),
     "tls13-support": (
         "Offer TLS 1.3",
         "TLS 1.3 removes old options and makes the handshake faster. It needs OpenSSL "
@@ -156,6 +161,9 @@ PRIORITY_TEXT: dict[str, str] = {
     "low": "Low",
 }
 
+# How a standard relates to a step: it requires the change, or recommends it.
+ROLE_TEXT: dict[str, str] = {"fail": "Required by:", "warn": "Recommended by:"}
+
 PROFILE_TEXT: dict[str, tuple[str, str]] = {
     "compatible": (
         "Compatible",
@@ -188,6 +196,7 @@ _GROUPS_PQ = "X25519MLKEM768:X25519:prime256v1:secp384r1"
 _LINES: dict[str, dict[str, dict[str, list[str]]]] = {
     "nginx": {
         "protocols": {"*": ["ssl_protocols TLSv1.2 TLSv1.3;"]},
+        "protocols13": {"*": ["ssl_protocols TLSv1.3;"]},
         "ciphers12": {
             "compatible": [
                 f"ssl_ciphers {_TLS12['compatible']};",
@@ -211,6 +220,7 @@ _LINES: dict[str, dict[str, dict[str, list[str]]]] = {
     },
     "apache": {
         "protocols": {"*": ["SSLProtocol -all +TLSv1.2 +TLSv1.3"]},
+        "protocols13": {"*": ["SSLProtocol -all +TLSv1.3"]},
         "ciphers12": {
             "compatible": [f"SSLCipherSuite {_TLS12['compatible']}", "SSLHonorCipherOrder off"],
             "strict": [f"SSLCipherSuite {_TLS12['strict']}", "SSLHonorCipherOrder on"],
@@ -255,6 +265,7 @@ _LIBRARY_LINES = [
 _CONTROL_LINES: dict[str, tuple[str, ...]] = {
     "protocol-versions": ("protocols",),
     "tls13-support": ("protocols",),
+    "tls13-only": ("protocols13",),
     "broken-ciphers": ("ciphers12",),
     "tls12-cipher-suites": ("ciphers12",),
     "forward-secrecy": ("ciphers12",),
@@ -265,6 +276,13 @@ _CONTROL_LINES: dict[str, tuple[str, ...]] = {
     "post-quantum": ("groups_pq",),
     "tls-compression": ("compression",),
 }
+
+
+# Rules whose fix differs from the rest of their control. Mozilla Modern files
+# "only TLS 1.3" under protocol versions, but switching off TLS 1.0 and 1.1
+# does not satisfy it, and the step has a cost the others do not have.
+_RULE_ACTION: dict[str, str] = {"MOZ-M-01": "tls13-only"}
+_ACTION_EVIDENCE: dict[str, frozenset[str]] = {"tls13-only": frozenset({"TLS1.2"})}
 
 
 def _lines(server: str, keys: Sequence[str], profile: str) -> list[str]:
@@ -378,7 +396,8 @@ def plan(report: Mapping[str, Any]) -> list[dict[str, Any]]:
         by_control: dict[str, list[dict[str, Any]]] = {}
         for finding in evaluation["findings"]:
             if finding["status"] in ("fail", "warn"):
-                by_control.setdefault(finding["control"], []).append(finding)
+                control = _RULE_ACTION.get(finding["rule_id"], finding["control"])
+                by_control.setdefault(control, []).append(finding)
         for control, findings in by_control.items():
             item = action(control)
             failed = [f for f in findings if f["status"] == "fail"]
@@ -390,8 +409,12 @@ def plan(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "rules": ", ".join(f["rule_id"] for f in findings),
                 }
             )
+            keep = _ACTION_EVIDENCE.get(control)
             for finding in findings:
-                add_evidence(item, finding["evidence"])
+                evidence = finding["evidence"]
+                if keep is not None:
+                    evidence = [e for e in evidence if str(e) in keep] or evidence
+                add_evidence(item, evidence)
             if not all(f.get("off_list_only") for f in findings):
                 item.off_list_only = False
                 if failed:

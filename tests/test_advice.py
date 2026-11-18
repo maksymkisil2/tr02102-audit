@@ -13,9 +13,9 @@ from tr02102_audit.standards import defaults, load_builtin
 STANDARDS = defaults(load_builtin())
 
 
-def lab(name: str) -> dict[str, Any]:
+def lab(name: str, standards: Any = STANDARDS) -> dict[str, Any]:
     text = resources.files("tr02102_audit.web").joinpath("demo", f"{name}.json").read_text()
-    return report.build(json.loads(text), STANDARDS)
+    return report.build(json.loads(text), standards)
 
 
 def by_control(actions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -61,6 +61,22 @@ def test_typical_website_has_nothing_critical_and_list_objections_are_low() -> N
         "ssl_conf_command Ciphersuites TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256;"
     ]
     assert {x["standard"] for x in tls13["affected"]} >= {"BSI TR-02102-2"}
+
+
+def test_tls13_only_is_its_own_step() -> None:
+    # Mozilla Modern files "only TLS 1.3" under protocol versions. A server that
+    # already refuses TLS 1.0 and 1.1 must not be told to switch them off.
+    typical = by_control(advice.plan(lab("tls-typical", list(load_builtin().values()))))
+    assert "protocol-versions" not in typical
+    only = typical["tls13-only"]
+    assert only["evidence"] == ["TLS1.2"]
+    assert only["snippets"]["nginx"] == ["ssl_protocols TLSv1.3;"]
+    assert [x["standard"] for x in only["affected"]] == ["Mozilla Modern"]
+    # On a weak server both steps appear, each with its own evidence.
+    weak = by_control(advice.plan(lab("tls-weak", list(load_builtin().values()))))
+    assert "TLS1.2" not in weak["protocol-versions"]["evidence"]
+    assert "Mozilla Modern" not in {x["standard"] for x in weak["protocol-versions"]["affected"]}
+    assert weak["tls13-only"]["evidence"] == ["TLS1.2"]
 
 
 def test_hardened_server_only_lacks_post_quantum() -> None:
