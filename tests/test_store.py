@@ -15,7 +15,7 @@ def test_settings_are_replaced_not_duplicated(store: Store) -> None:
     store.set_setting("registration_open", "1")
     store.set_setting("registration_open", "0")
     assert store.setting("registration_open") == "0"
-    assert store.setting("schema_version") == "1"
+    assert store.setting("schema_version") == "2"
 
 
 def test_users_have_unique_logins_and_whitelisted_columns(store: Store) -> None:
@@ -156,3 +156,80 @@ def test_postgresql_without_a_driver_fails_with_a_clear_message(
     monkeypatch.setattr(importlib, "import_module", no_driver)
     with pytest.raises(StoreError, match="psycopg"):
         Database("postgresql://user:secret@db.example/app", tmp_path)
+
+
+def test_version_1_database_is_upgraded_in_place(tmp_path: Path) -> None:
+    """A database created by 0.2.0 gains the servers table and the format column."""
+    import sqlite3
+
+    path = tmp_path / "tr02102-audit.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE scans (id INTEGER PRIMARY KEY AUTOINCREMENT, public_id TEXT UNIQUE, "
+            "user_id BIGINT, host TEXT, port BIGINT, ip TEXT, standards TEXT, status TEXT, "
+            "created_at BIGINT, finished_at BIGINT, observation TEXT, grade TEXT, verdicts TEXT, "
+            "error TEXT)"
+        )
+        conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO settings VALUES ('schema_version', '1')")
+        conn.execute(
+            "INSERT INTO scans (public_id, user_id, host, port, ip, standards, status, created_at) "
+            "VALUES ('old', 1, 'example.org', 443, '1.1.1.1', '[]', 'done', 1)"
+        )
+    database = Database("", tmp_path)
+    store = Store(database)
+    assert store.schema_version == 2 and store.setting("schema_version") == "2"
+    assert "output" in database.columns("scans")
+    assert store.scan("old") is not None, "existing rows survive"
+    store.save_target(1, "example.org", 443, standards=["ietf-rfc9325"])
+    assert store.targets(user_id=1)[0]["checks"] == 1
+    database.close()
+    again = Store(Database("", tmp_path))  # running the steps twice changes nothing
+    assert again.schema_version == 2
+    again.db.close()
+
+
+def test_saved_servers_and_their_history(store: Store) -> None:
+    owner = store.create_user("anna@example.org", "hash")
+    other = store.create_user("boris@example.org", "hash")
+    first = store.save_target(owner, "example.org", 443, label="Website", standards=["a"])
+    assert store.save_target(owner, "example.org", 443, label="Renamed", standards=["b"]) == first
+    store.save_target(other, "example.org", 443, standards=["a"])
+    target = store.target(first)
+    assert target is not None
+    assert (target["label"], target["standards"]) == ("Renamed", ["b"])
+    for n, public_id in enumerate(("s1", "s2", "s3")):
+        store.create_scan(public_id, owner, "example.org", 443, "1.1.1.1", ["b"], output="pdf")
+        store.db.execute(
+            "UPDATE scans SET created_at = ? WHERE public_id = ?", (100 + n, public_id)
+        )
+    store.create_scan("foreign", other, "example.org", 443, "1.1.1.1", ["a"])
+    store.create_scan("elsewhere", owner, "example.net", 443, "1.1.1.2", ["a"])
+    history = store.endpoint_scans(owner, "example.org", 443)
+    assert [h["public_id"] for h in history] == ["s3", "s2", "s1"]
+    assert history[0]["output"] == "pdf"
+    mine = store.targets(user_id=owner)
+    assert len(mine) == 1 and mine[0]["checks"] == 3 and mine[0]["latest"]["public_id"] == "s3"
+    assert len(store.targets()) == 2
+    store.delete_target(first)
+    assert store.target(first) is None and store.scan("s1") is not None, "reports stay"
+    store.delete_user(other)
+    assert store.count_targets() == 0
+
+
+def test_event_filters(store: Store) -> None:
+    store.add_event("login.failed", login="Anna", ip="203.0.113.7", user_agent="Firefox")
+    store.add_event("login.failed", login="boris", ip="198.51.100.1")
+    store.add_event("scan.started", login="anna", ip="203.0.113.7")
+    store.db.execute("UPDATE events SET ts = 1000 WHERE login = 'boris'")
+    assert store.count_events(ip="203.0.113.7") == 2
+    assert store.count_events(login="ANNA") == 2
+    assert store.count_events(text="firefox") == 1
+    assert store.count_events(until=2000) == 1 and store.count_events(since=2000) == 2
+    assert [e["login"] for e in store.events(kind="login", ip="203.0.113.7")] == ["Anna"]
+
+
+def test_health(store: Store) -> None:
+    health = store.health()
+    assert health["schema_version"] == 2 and health["latency_ms"] >= 0
+    assert {"users", "scans", "targets", "events"} <= set(health)

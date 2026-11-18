@@ -38,6 +38,16 @@
   </aside>
 </section>
 
+<section class="idea">
+  <h2>{{ _('The idea') }}</h2>
+  <p class="lead">{{ _('Five published standards say how a server should encrypt its connections, and they disagree. A scanner that only answers “fail” leaves the real work to the reader: which standard objects, why, and what to change.') }}</p>
+  <div class="trio">
+    <div><h3>{{ _('Facts first') }}</h3><p>{{ _('What the server accepts is measured once and stored. Judging it is a separate step, so a stored check can be judged again when a standard changes.') }}</p></div>
+    <div><h3>{{ _('Every standard in its own words') }}</h3><p>{{ _('What a document requires is a failure, what it recommends is a warning. Every finding names the section it comes from.') }}</p></div>
+    <div><h3>{{ _('An answer you can act on') }}</h3><p>{{ _('The report starts with what to change first, and gives the lines of server configuration that do it.') }}</p></div>
+  </div>
+</section>
+
 <section>
   <h2>{{ _('How a check works') }}</h2>
   <ol class="steps">
@@ -47,7 +57,38 @@
       <p>{{ _('The same facts are evaluated against each standard. “Must” in the standard is a failure, “should” is a warning, exactly as the document words it.') }}</p></li>
     <li><h3>{{ _('Explain') }}</h3>
       <p>{{ _('The report gives an overall rating from A+ to F, a verdict per standard, and for every finding the reason, the evidence and the fix.') }}</p></li>
+    <li><h3>{{ _('Check again') }}</h3>
+      <p>{{ _('Change the server, check it again with one click, and compare the two reports: what was fixed, what is new, what the server accepts now.') }}</p></li>
   </ol>
+</section>
+
+<section>
+  <h2>{{ _('What a report contains') }}</h2>
+  <dl class="contents">
+    <div><dt>{{ _('Rating and verdicts') }}</dt><dd>{{ _('A grade from A+ to F, and for each standard: conforms, conforms with warnings, or does not conform.') }}</dd></div>
+    <div><dt>{{ _('Action plan') }}</dt><dd>{{ _('The changes in order of importance, with nginx and Apache configuration and the evidence that led to each one.') }}</dd></div>
+    <div><dt>{{ _('Evidence') }}</dt><dd>{{ _('Protocol versions, cipher suites, key-exchange groups, certificate and extensions, as measured, with a fingerprint of the measurement.') }}</dd></div>
+    <div><dt>{{ _('Formats') }}</dt><dd>{{ _('Web page and PDF for people, JSON for scripts, SARIF for CI dashboards. You choose before the check; all are available afterwards.') }}</dd></div>
+  </dl>
+</section>
+
+<section>
+  <h2>{{ _('Who it is for') }}</h2>
+  <div class="trio">
+    <div><h3>{{ _('Administrators') }}</h3><p>{{ _('See what to change on a web server, mail server or appliance, and confirm the result after the change.') }}</p></div>
+    <div><h3>{{ _('Security and compliance') }}</h3><p>{{ _('Get evidence for ISO 27001, NIS2 or PCI DSS audits that names the standard and the clause, and keep a history.') }}</p></div>
+    <div><h3>{{ _('Learners') }}</h3><p>{{ _('Run the lab on your own computer, configure a server, and watch how each setting changes the result.') }}</p></div>
+  </div>
+</section>
+
+<section class="lab-teaser sheet">
+  <div>
+    <h2>{{ _('Practise on your own server') }}</h2>
+    <p>{{ _('The project includes a test lab: the web interface, three servers with known configurations, and one server that is yours to configure. It runs on a laptop with Docker.') }}</p>
+    <p><a href="{{ url_for('public.about') }}#lab">{{ _('How to start the lab') }}</a></p>
+  </div>
+  <pre><code>docker compose -f lab/docker-compose.yml up -d --build
+# {{ _('then open') }} http://127.0.0.1:8080</code></pre>
 </section>
 
 <section>

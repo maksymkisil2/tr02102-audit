@@ -6,5 +6,8 @@
   <div class="spinner" aria-hidden="true"></div>
   <h1>{{ _('Checking') }} <span class="code">{{ scan.host }}:{{ scan.port }}</span></h1>
   <p class="quiet" role="status">{{ _('This page reloads by itself until the report is ready.') }}</p>
+  {% if scan.output and scan.output != 'web' %}
+    <p class="quiet">{{ _('Chosen format:') }} {{ _(formats[scan.output]) }}. {{ _('The download appears at the top of the report.') }}</p>
+  {% endif %}
 </section>
 {% endblock %}

@@ -16,10 +16,10 @@ from flask import (
 from flask import session as flask_session
 from flask.typing import ResponseReturnValue
 
-from tr02102_audit import report, sarif
+from tr02102_audit import report
 from tr02102_audit.netguard import TargetError, parse_target, resolve
 from tr02102_audit.standards import Standard, defaults
-from tr02102_audit.web import quota, security
+from tr02102_audit.web import quota, reporting, security
 from tr02102_audit.web.common import (
     PAGE_SIZE,
     audit,
@@ -31,7 +31,6 @@ from tr02102_audit.web.common import (
     services,
     tr,
 )
-from tr02102_audit.web.views_public import json_download
 
 bp = Blueprint("account", __name__)
 
@@ -64,6 +63,72 @@ def _chosen_standards(ids: list[str]) -> list[Standard]:
     return [available[i] for i in ids if i in available]
 
 
+def start_scan(
+    user: dict[str, Any],
+    target_text: str,
+    chosen: list[str],
+    *,
+    output: str = reporting.DEFAULT_FORMAT,
+    keep: bool = False,
+    label: str = "",
+) -> str | None:
+    """Check the limits, start a background check and return its id.
+
+    Every refusal is explained to the user with a notice and, where it says
+    something about the user's intent, written to the audit log.
+    """
+    svc = services()
+    try:
+        host, port = parse_target(target_text)
+        target = resolve(
+            host,
+            port,
+            allow_private=current_app.config["ALLOW_PRIVATE_TARGETS"],
+            allowed_networks=current_app.config["PRIVATE_NETWORKS"],
+        )
+    except TargetError as exc:
+        # Refused targets are logged: probing for private addresses is what an
+        # attack on the scanner itself looks like (threat T-14).
+        audit("scan.rejected", f"{target_text[:120]}: {exc}")
+        notice(TARGET_PROBLEMS.get(exc.reason, TARGET_PROBLEMS["invalid"]), "error")
+        return None
+
+    where = f"{target.host}:{target.port}"
+    allowance = _allowance(user)
+    if not allowance.can_scan:
+        audit("scan.quota", f"{where} (monthly limit)")
+        notice("No checks left this month. The limit starts again on the first.", "error")
+        return None
+    if svc.jobs.busy():
+        notice("The scanner is busy. Try again in a minute.", "error")
+        return None
+    if not svc.scan_limiter.allow(f"user:{user['id']}"):
+        audit("scan.quota", f"{where} (hourly limit)")
+        notice(
+            "Hourly limit reached (%(n)s checks). Try again later.",
+            "error",
+            n=svc.scan_limiter.limit,
+        )
+        return None
+
+    if keep:
+        svc.store.save_target(user["id"], target.host, target.port, label=label, standards=chosen)
+    public_id = secrets.token_urlsafe(12)
+    svc.store.create_scan(
+        public_id, user["id"], target.host, target.port, target.ip, chosen, output=output
+    )
+    audit("scan.started", f"{where} ({target.ip}); {', '.join(chosen)}")
+    store, login, user_id = svc.store, user["login"], user["id"]
+
+    def done(scan_id: str, outcome: str) -> None:
+        store.add_event("scan.finished", user_id=user_id, login=login, detail=f"{where}: {outcome}")
+
+    svc.jobs.submit(
+        public_id, target, _chosen_standards(chosen), current_app.config["SCAN_FN"], done
+    )
+    return public_id
+
+
 @bp.route("/scan", methods=["GET", "POST"])
 @login_required
 def scan() -> ResponseReturnValue:
@@ -71,72 +136,54 @@ def scan() -> ResponseReturnValue:
     user = _me()
     target_text = request.args.get("target", "")[:300]
     chosen = [s.id for s in defaults(svc.standards)]
-    allowance = _allowance(user)
+    output = reporting.DEFAULT_FORMAT
+    keep, label = True, ""
+    saved = svc.store.target_by_endpoint(user["id"], *_split(target_text))
+    if saved is not None:
+        chosen = [s for s in saved["standards"] if s in svc.standards] or chosen
+        label = saved["label"]
 
     if request.method == "POST":
         target_text = request.form.get("target", "")[:300]
         chosen = [s for s in request.form.getlist("standard") if s in svc.standards]
-        target = None
+        output = request.form.get("output", reporting.DEFAULT_FORMAT)
+        output = output if output in reporting.FORMATS else reporting.DEFAULT_FORMAT
+        keep = request.form.get("keep") == "yes"
+        label = request.form.get("label", "").strip()[:80]
         if not chosen:
             notice("Choose at least one standard.", "error")
         elif request.form.get("authorised") != "yes":
             notice("Confirm that you are authorised to test this server.", "error")
         else:
-            try:
-                host, port = parse_target(target_text)
-                target = resolve(
-                    host, port, allow_private=current_app.config["ALLOW_PRIVATE_TARGETS"]
-                )
-            except TargetError as exc:
-                # Refused targets are logged: probing for private addresses is
-                # what an attack on the scanner itself looks like (threat T-14).
-                audit("scan.rejected", f"{target_text[:120]}: {exc}")
-                notice(TARGET_PROBLEMS.get(exc.reason, TARGET_PROBLEMS["invalid"]), "error")
-        if target is not None:
-            where = f"{target.host}:{target.port}"
-            if not allowance.can_scan:
-                audit("scan.quota", f"{where} (monthly limit)")
-                notice("No checks left this month. The limit starts again on the first.", "error")
-            elif svc.jobs.busy():
-                notice("The scanner is busy. Try again in a minute.", "error")
-            elif not svc.scan_limiter.allow(f"user:{user['id']}"):
-                audit("scan.quota", f"{where} (hourly limit)")
-                notice(
-                    "Hourly limit reached (%(n)s checks). Try again later.",
-                    "error",
-                    n=svc.scan_limiter.limit,
-                )
-            else:
-                public_id = secrets.token_urlsafe(12)
-                svc.store.create_scan(
-                    public_id, user["id"], target.host, target.port, target.ip, chosen
-                )
-                audit("scan.started", f"{where} ({target.ip}); {', '.join(chosen)}")
-                store, login, user_id = svc.store, user["login"], user["id"]
-
-                def done(scan_id: str, outcome: str) -> None:
-                    store.add_event(
-                        "scan.finished", user_id=user_id, login=login, detail=f"{where}: {outcome}"
-                    )
-
-                svc.jobs.submit(
-                    public_id,
-                    target,
-                    _chosen_standards(chosen),
-                    current_app.config["SCAN_FN"],
-                    done,
-                )
+            public_id = start_scan(user, target_text, chosen, output=output, keep=keep, label=label)
+            if public_id:
                 return redirect(url_for("account.report_page", public_id=public_id))
 
     return render_template(
         "scan.html",
-        form={"target": target_text, "standards": chosen},
+        form={
+            "target": target_text,
+            "standards": chosen,
+            "output": output,
+            "keep": keep,
+            "label": label,
+        },
         standards=list(svc.standards.values()),
-        allowance=allowance,
+        formats=reporting.FORMATS,
+        allowance=_allowance(user),
+        private_networks=current_app.config["PRIVATE_NETWORKS"],
     )
 
 
-def _owned_scan(public_id: str) -> dict[str, Any]:
+def _split(target_text: str) -> tuple[str, int]:
+    """Host and port of a target typed by the user, or a pair that matches nothing."""
+    try:
+        return parse_target(target_text)
+    except TargetError:
+        return "", 0
+
+
+def owned_scan(public_id: str) -> dict[str, Any]:
     found = services().store.scan(public_id)
     user = _me()
     # Reports of other accounts answer exactly like reports that do not exist.
@@ -145,7 +192,7 @@ def _owned_scan(public_id: str) -> dict[str, Any]:
     return found
 
 
-def _report_of(scan_row: dict[str, Any]) -> dict[str, Any]:
+def report_of(scan_row: dict[str, Any]) -> dict[str, Any]:
     if scan_row["status"] != "done" or scan_row["observation"] is None:
         abort(404)
     standards = _chosen_standards(scan_row["standards"]) or defaults(services().standards)
@@ -173,9 +220,9 @@ def reports() -> str:
 @bp.get("/reports/<public_id>")
 @login_required
 def report_page(public_id: str) -> ResponseReturnValue:
-    row = _owned_scan(public_id)
+    row = owned_scan(public_id)
     if row["status"] in ("queued", "running"):
-        return render_template("pending.html", scan=row)
+        return render_template("pending.html", scan=row, formats=reporting.FORMATS)
     if row["status"] == "error":
         return render_template(
             "error.html",
@@ -183,26 +230,34 @@ def report_page(public_id: str) -> ResponseReturnValue:
             detail=row["error"],
             code=None,
         )
-    return render_template("report.html", r=_report_of(row), demo=None, scan=row)
+    store = services().store
+    history = store.endpoint_scans(row["user_id"], row["host"], row["port"], limit=20)
+    # The history is newest first: the previous check is the next finished one after this.
+    ids = [h["public_id"] for h in history]
+    after = history[ids.index(public_id) + 1 :] if public_id in ids else []
+    earlier = [h for h in after if h["status"] == "done"]
+    return render_template(
+        "report.html",
+        **reporting.context(report_of(row)),
+        demo=None,
+        scan=row,
+        formats=reporting.FORMATS,
+        previous=earlier[0] if earlier else None,
+        saved=store.target_by_endpoint(row["user_id"], row["host"], row["port"]),
+    )
 
 
-@bp.get("/reports/<public_id>.json")
+@bp.get("/reports/<public_id>.<any(json, sarif, pdf):fmt>")
 @login_required
-def report_json(public_id: str) -> Response:
-    return json_download(_report_of(_owned_scan(public_id)), f"tls-audit-{public_id}.json")
-
-
-@bp.get("/reports/<public_id>.sarif")
-@login_required
-def report_sarif(public_id: str) -> Response:
-    rep = _report_of(_owned_scan(public_id))
-    return json_download(sarif.build(rep), f"tls-audit-{public_id}.sarif")
+def report_file(public_id: str, fmt: str) -> Response:
+    row = owned_scan(public_id)
+    return reporting.download(report_of(row), fmt, f"tls-audit-{row['host']}-{public_id}")
 
 
 @bp.post("/reports/<public_id>/delete")
 @login_required
 def report_delete(public_id: str) -> ResponseReturnValue:
-    row = _owned_scan(public_id)
+    row = owned_scan(public_id)
     services().store.delete_scan(public_id)
     audit("report.deleted", f"{row['host']}:{row['port']}")
     notice("The report was deleted.", "ok")

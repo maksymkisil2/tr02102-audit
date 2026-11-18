@@ -1,40 +1,76 @@
 {% extends "base.html" %}
 {% block title %}{{ _('New check') }}{% endblock %}
 {% block content %}
-<section class="narrow">
-  <h1>{{ _('New check') }}</h1>
-  <p class="quiet">
-    {% if allowance.unlimited %}{{ _('Administrator: no monthly limit.') }}
-    {% else %}{{ _('%(left)s of %(included)s checks left this month.', left=allowance.left, included=allowance.included) }}
-    {% endif %}
-  </p>
-  <form method="post" class="stack sheet">
-    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-    <div>
-      <label for="target">{{ _('Server') }}</label>
-      <input id="target" name="target" type="text" value="{{ form.target }}" placeholder="example.org" autocomplete="off" autocapitalize="off" spellcheck="false" required autofocus>
-      <p class="hint">{{ _('Host name or IP address, with an optional port (default 443). Only public addresses can be checked here.') }}</p>
-    </div>
+<section class="form-page">
+  <div>
+    <h1>{{ _('New check') }}</h1>
+    <p class="quiet">
+      {% if allowance.unlimited %}{{ _('Administrator: no monthly limit.') }}
+      {% else %}{{ _('%(left)s of %(included)s checks left this month.', left=allowance.left, included=allowance.included) }}
+      {% endif %}
+    </p>
+    <form method="post" class="stack sheet">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <div>
+        <label for="target">{{ _('Server') }}</label>
+        <input id="target" name="target" type="text" value="{{ form.target }}" placeholder="example.org" autocomplete="off" autocapitalize="off" spellcheck="false" required autofocus>
+        <p class="hint">{{ _('Host name or IP address, with an optional port (default 443).') }}
+          {% if private_networks %}{{ _('Public addresses and these lab networks can be checked here:') }} <span class="code">{{ private_networks|join(', ') }}</span>
+          {% else %}{{ _('Only public addresses can be checked here.') }}{% endif %}</p>
+      </div>
 
-    <fieldset>
-      <legend>{{ _('Compare with') }}</legend>
-      {% for key, label in categories.items() %}
-        <p class="quiet small">{{ _(label) }}</p>
-        {% for s in standards if s.category == key %}
-          <label class="check">
-            <input type="checkbox" name="standard" value="{{ s.id }}"{% if s.id in form.standards %} checked{% endif %}>
-            <span><strong>{{ s.short_name }}</strong> <span class="quiet">{{ s.edition }}, {{ s.region }}</span></span>
-          </label>
+      <fieldset>
+        <legend>{{ _('Compare with') }}</legend>
+        {% for key, label in categories.items() %}
+          <p class="quiet small">{{ _(label) }}</p>
+          {% for s in standards if s.category == key %}
+            <label class="check">
+              <input type="checkbox" name="standard" value="{{ s.id }}"{% if s.id in form.standards %} checked{% endif %}>
+              <span><strong>{{ s.short_name }}</strong> <span class="quiet">{{ s.edition }}, {{ s.region }}</span></span>
+            </label>
+          {% endfor %}
         {% endfor %}
-      {% endfor %}
-    </fieldset>
+      </fieldset>
 
-    <label class="check">
-      <input type="checkbox" name="authorised" value="yes" required>
-      <span>{{ _('I am authorised to test this server.') }}</span>
-    </label>
-    <button class="btn" type="submit">{{ _('Check server') }}</button>
-  </form>
-  <p class="hint">{{ _('A check opens up to a few hundred short connections and usually takes 5 to 60 seconds. Who checked what is recorded.') }}</p>
+      <fieldset>
+        <legend>{{ _('Report format') }}</legend>
+        <div class="choices">
+          {% for key, label in formats.items() %}
+            <label class="choice">
+              <input type="radio" name="output" value="{{ key }}"{% if key == form.output %} checked{% endif %}>
+              <span>{{ _(label) }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        <p class="hint">{{ _('The report always opens as a web page as well; the other formats can be downloaded from there at any time.') }}</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>{{ _('My servers') }}</legend>
+        <label class="check">
+          <input type="checkbox" name="keep" value="yes"{% if form.keep %} checked{% endif %}>
+          <span>{{ _('Keep this server in my list, to check it again with one click and compare the results.') }}</span>
+        </label>
+        <div>
+          <label for="label">{{ _('Name in the list (optional)') }}</label>
+          <input id="label" name="label" type="text" maxlength="80" value="{{ form.label }}" placeholder="{{ _('for example: lab nginx, company website') }}">
+        </div>
+      </fieldset>
+
+      <label class="check">
+        <input type="checkbox" name="authorised" value="yes" required>
+        <span>{{ _('I am authorised to test this server.') }}</span>
+      </label>
+      <div><button class="btn" type="submit">{{ _('Check server') }}</button></div>
+    </form>
+  </div>
+  <aside class="side-notes">
+    <h2>{{ _('What happens now') }}</h2>
+    <ol class="mini-steps">
+      <li>{{ _('A check opens up to a few hundred short connections and usually takes 5 to 60 seconds. Who checked what is recorded.') }}</li>
+      <li>{{ _('The report starts with what to change first, and gives the lines of server configuration that do it.') }}</li>
+      <li>{{ _('Change the server, check it again, and compare the two reports to see what the change did.') }}</li>
+    </ol>
+  </aside>
 </section>
 {% endblock %}

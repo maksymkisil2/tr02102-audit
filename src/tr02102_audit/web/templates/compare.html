@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% from "_macros.html" import grade_chip, verdict %}
+{% block title %}{{ _('Before and after') }}{% endblock %}
+{% block content %}
+{% if target %}<p class="crumbs"><a href="{{ url_for('servers.servers') }}">{{ _('My servers') }}</a> / <a href="{{ url_for('servers.server', target_id=target.id) }}">{{ target.label or target.host }}</a></p>{% endif %}
+<h1>{{ _('Before and after') }}</h1>
+{% if not same_endpoint %}
+  <p class="note caution">{{ _('These two checks are of different servers. The comparison still works, but it shows differences between servers, not the effect of a change.') }}</p>
+{% endif %}
+
+<section class="compare-head">
+  <a class="sheet side" href="{{ url_for('account.report_page', public_id=old.public_id) }}">
+    <span class="quiet small">{{ _('Before') }}</span>
+    {{ grade_chip(diff.rating.before) }}
+    <span class="code small">{{ old.host }}:{{ old.port }}</span>
+    <span class="small">{{ old.created_at|when('%Y-%m-%d %H:%M') }}</span>
+  </a>
+  <span class="arrow arrow-{{ diff.rating.direction }}" aria-hidden="true">→</span>
+  <a class="sheet side" href="{{ url_for('account.report_page', public_id=new.public_id) }}">
+    <span class="quiet small">{{ _('After') }}</span>
+    {{ grade_chip(diff.rating.after) }}
+    <span class="code small">{{ new.host }}:{{ new.port }}</span>
+    <span class="small">{{ new.created_at|when('%Y-%m-%d %H:%M') }}</span>
+  </a>
+  <p class="verdict-line">
+    {% if diff.rating.direction == 'better' %}<span class="tag good">{{ _('The rating went up.') }}</span>
+    {% elif diff.rating.direction == 'worse' %}<span class="tag bad">{{ _('The rating went down.') }}</span>
+    {% elif not diff.changed %}<span class="tag">{{ _('Nothing changed between the two checks.') }}</span>
+    {% else %}<span class="tag">{{ _('The rating stayed the same.') }}</span>{% endif %}
+  </p>
+</section>
+
+{% if diff.verdicts %}
+<section>
+  <h2>{{ _('Verdicts that changed') }}</h2>
+  <div class="sheet scroll"><table>
+    <thead><tr><th>{{ _('Standard') }}</th><th>{{ _('Before') }}</th><th>{{ _('After') }}</th></tr></thead>
+    <tbody>{% for v in diff.verdicts %}<tr><td>{{ v.standard }}</td><td>{{ verdict(v.before) }}</td><td>{{ verdict(v.after) }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+
+{% if diff.lists or diff['values'] %}
+<section>
+  <h2>{{ _('What the server accepts now') }}</h2>
+  <div class="sheet">
+    <ul class="changes">
+      {% for item in diff.lists %}
+        <li><h3>{{ _(item.label) }}</h3>
+          {% for x in item.added %}<span class="delta add code">+ {{ x }}</span>{% endfor %}
+          {% for x in item.removed %}<span class="delta del code">− {{ x }}</span>{% endfor %}
+        </li>
+      {% endfor %}
+      {% for v in diff['values'] %}
+        <li><h3>{{ _(v.label) }}</h3>
+          <span class="delta del code">{{ v.before if v.before is not none else '–' }}</span> → <span class="delta add code">{{ v.after if v.after is not none else '–' }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endif %}
+
+<section class="columns">
+  <div class="sheet">
+    <h2>{{ _('Fixed') }} <span class="quiet small">({{ diff.fixed|length }})</span></h2>
+    {% if diff.fixed %}
+      <ul class="plain-list">{% for f in diff.fixed %}<li><span class="stamp pass bare"></span> <strong>{{ f.title }}</strong> <span class="quiet small">{{ f.standard }} · {{ f.rule_id }}</span></li>{% endfor %}</ul>
+    {% else %}<p class="quiet">{{ _('Nothing.') }}</p>{% endif %}
+  </div>
+  <div class="sheet">
+    <h2>{{ _('New problems') }} <span class="quiet small">({{ diff.appeared|length }})</span></h2>
+    {% if diff.appeared %}
+      <ul class="plain-list">{% for f in diff.appeared %}<li><span class="stamp {{ f.status }} bare"></span> <strong>{{ f.title }}</strong> <span class="quiet small">{{ f.standard }} · {{ f.rule_id }}</span></li>{% endfor %}</ul>
+    {% else %}<p class="quiet">{{ _('Nothing.') }}</p>{% endif %}
+  </div>
+</section>
+{% endblock %}

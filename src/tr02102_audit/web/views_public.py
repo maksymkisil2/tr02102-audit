@@ -20,9 +20,9 @@ from flask import (
 from flask import session as flask_session
 from flask.typing import ResponseReturnValue
 
-from tr02102_audit import __version__, report, sarif
+from tr02102_audit import __version__, report
 from tr02102_audit.standards import defaults
-from tr02102_audit.web import i18n, security
+from tr02102_audit.web import i18n, reporting, security
 from tr02102_audit.web.common import audit, current_user, notice, remote_ip, services
 from tr02102_audit.web.frameworks import FRAMEWORKS
 
@@ -49,12 +49,6 @@ def _demo_report(name: str) -> dict[str, Any]:
     return report.build(_load_demo(name), defaults(services().standards))
 
 
-def json_download(data: dict[str, Any], filename: str) -> Response:
-    resp = Response(json.dumps(data, indent=2), mimetype="application/json")
-    resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return resp
-
-
 def _sign_in(user: dict[str, Any]) -> None:
     """Start a fresh session for ``user`` (a new session id against fixation)."""
     lang = flask_session.get("lang")
@@ -64,6 +58,10 @@ def _sign_in(user: dict[str, Any]) -> None:
     flask_session["sv"] = security.session_stamp(user["password_hash"])
     if lang:
         flask_session["lang"] = lang
+
+
+def _masked(name: str) -> str:
+    return security.mask_login(name, str(current_app.config["SECRET_KEY"]).encode())
 
 
 def _safe_next() -> str:
@@ -95,6 +93,11 @@ def index() -> str:
     )
 
 
+@bp.get("/about")
+def about() -> str:
+    return render_template("about.html")
+
+
 @bp.get("/standards")
 def standards_page() -> str:
     return render_template(
@@ -116,18 +119,17 @@ def legal(page: str) -> str:
 @bp.get("/demo/<name>")
 def demo(name: str) -> str:
     return render_template(
-        "report.html", r=_demo_report(name), demo=name, demo_title=DEMOS[name], scan=None
+        "report.html",
+        **reporting.context(_demo_report(name)),
+        demo=name,
+        demo_title=DEMOS[name],
+        scan=None,
     )
 
 
-@bp.get("/demo/<name>.json")
-def demo_json(name: str) -> Response:
-    return json_download(_demo_report(name), f"demo-{name}.json")
-
-
-@bp.get("/demo/<name>.sarif")
-def demo_sarif(name: str) -> Response:
-    return json_download(sarif.build(_demo_report(name)), f"demo-{name}.sarif")
+@bp.get("/demo/<name>.<any(json, sarif, pdf):fmt>")
+def demo_file(name: str, fmt: str) -> Response:
+    return reporting.download(_demo_report(name), fmt, f"demo-{name}")
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -144,7 +146,7 @@ def login() -> ResponseReturnValue:
             (svc.account_limiter, f"login:{name}"),
         )
         if not all(limiter.peek(key) for limiter, key in limits):
-            audit("login.blocked", "too many failed attempts", login=security.mask_login(name))
+            audit("login.blocked", "too many failed attempts", login=_masked(name))
             notice("Too many failed attempts. Try again in 15 minutes.", "error")
         else:
             user = svc.store.user_by_login(name) if name else None
@@ -162,7 +164,7 @@ def login() -> ResponseReturnValue:
             elif user:
                 audit("login.failed", "wrong password", login=user["login"])
             else:
-                audit("login.failed", "unknown login name", login=security.mask_login(name))
+                audit("login.failed", "unknown login name", login=_masked(name))
             notice("Wrong login name or password.", "error")
     return render_template("login.html", login=name)
 

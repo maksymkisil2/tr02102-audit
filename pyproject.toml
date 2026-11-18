@@ -29,6 +29,7 @@ dependencies = [
     "cryptography>=44",  # X.509 parsing
     "PyYAML>=6.0",       # standard files (safe_load only)
     "Flask>=3.1",        # web interface
+    "reportlab>=4.2",    # PDF reports
 ]
 
 [project.optional-dependencies]
@@ -58,7 +59,7 @@ version = { attr = "tr02102_audit.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-tr02102_audit = ["py.typed", "rating.yaml"]
+tr02102_audit = ["py.typed", "rating.yaml", "fonts/*"]
 "tr02102_audit.standards" = ["*.yaml"]
 "tr02102_audit.web" = ["templates/*.html", "static/*", "demo/*.json", "locale/*.json"]
 
@@ -83,6 +84,8 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# Interface texts are message ids: one literal each, typographic quotes kept.
+"src/tr02102_audit/web/pdf.py" = ["E501", "RUF001"]
 # pytest asserts; test passwords; tests start openssl
 "tests/**" = ["S101", "S104", "S105", "S106", "S603", "S607", "E501"]
 
@@ -94,7 +97,7 @@ mypy_path = "src"
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["yaml"]
+module = ["yaml", "reportlab.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

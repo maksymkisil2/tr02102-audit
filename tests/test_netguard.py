@@ -2,7 +2,13 @@
 
 import pytest
 
-from tr02102_audit.netguard import TargetError, is_public, parse_target, resolve
+from tr02102_audit.netguard import (
+    TargetError,
+    is_public,
+    parse_networks,
+    parse_target,
+    resolve,
+)
 
 
 @pytest.mark.parametrize(
@@ -58,3 +64,26 @@ def test_resolve_blocks_loopback_unless_allowed() -> None:
     with pytest.raises(TargetError):
         resolve("127.0.0.1", 443, allow_private=False)
     assert resolve("127.0.0.1", 443, allow_private=True).sni is None
+
+
+def test_named_private_networks_may_be_checked_and_nothing_else() -> None:
+    lab = parse_networks("172.30.80.0/24, 10.9.9.9")
+    assert (
+        resolve("172.30.80.5", 443, allow_private=False, allowed_networks=lab).ip == "172.30.80.5"
+    )
+    assert resolve("10.9.9.9", 443, allow_private=False, allowed_networks=lab).ip == "10.9.9.9"
+    for outside in ("172.30.81.5", "10.9.9.8", "127.0.0.1", "169.254.169.254"):
+        with pytest.raises(TargetError) as caught:
+            resolve(outside, 443, allow_private=False, allowed_networks=lab)
+        assert caught.value.reason == "private"
+
+
+def test_network_list_parsing() -> None:
+    assert parse_networks("") == ()
+    assert [str(n) for n in parse_networks("192.168.1.0/24 fd00::/8,10.0.0.1")] == [
+        "192.168.1.0/24",
+        "fd00::/8",
+        "10.0.0.1/32",
+    ]
+    with pytest.raises(ValueError, match="not a network"):
+        parse_networks("lab.example")

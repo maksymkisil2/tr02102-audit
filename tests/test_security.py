@@ -1,5 +1,6 @@
 """Passwords, rate limiting and the address a request comes from."""
 
+import re
 import time
 
 import pytest
@@ -62,7 +63,13 @@ def test_session_stamp_changes_with_the_password() -> None:
 
 
 def test_unknown_login_names_are_shortened_for_the_log() -> None:
-    assert security.mask_login("hunter2-is-my-password") == "hu… (22 characters)"
+    masked = security.mask_login("hunter2-is-my-password", b"key")
+    assert re.fullmatch(r"hu… \(22 characters, #[0-9a-f]{4}\)", masked)
+    assert "hunter2" not in masked
+    # The same name gives the same mark, another name or another key a different one.
+    assert masked == security.mask_login("hunter2-is-my-password", b"key")
+    assert masked != security.mask_login("hunter3-is-my-password", b"key")
+    assert masked != security.mask_login("hunter2-is-my-password", b"other key")
     assert security.mask_login("  ") == "(empty)"
 
 

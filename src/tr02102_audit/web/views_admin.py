@@ -1,13 +1,31 @@
-"""Administration: who uses the service and from where, accounts, settings."""
+"""Administration: who uses the service and from where, accounts, settings.
 
+Pages: overview (figures, activity, signals, the instance), audit log (with
+filters and CSV export), checks, servers, accounts. Each page is one view
+function plus one template; a new page is added the same way and listed in
+``templates/_admin_nav.html``. Every view carries ``@admin_required``.
+"""
+
+import csv
+import io
 import time
 from collections import Counter
+from datetime import UTC, datetime
 from typing import Any
 
-from flask import Blueprint, abort, current_app, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    current_app,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask.typing import ResponseReturnValue
 
-from tr02102_audit.web import quota, security
+from tr02102_audit.web import quota, security, signals
 from tr02102_audit.web.common import (
     PAGE_SIZE,
     admin_required,
@@ -20,7 +38,8 @@ from tr02102_audit.web.common import (
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
-EVENT_GROUPS = ("login", "register", "scan", "report", "account", "admin")
+EVENT_GROUPS = ("login", "register", "scan", "report", "server", "account", "admin")
+CSV_LIMIT = 50_000
 ACTIVITY_DAYS = 14
 DAY = 86400
 
@@ -146,18 +165,21 @@ def overview() -> str:
         "rejected_7d": store.count_events(kind="scan.rejected", since=now - 7 * DAY),
     }
     db = store.db
+    health = store.health()
     return render_template(
         "admin_overview.html",
         figures=figures,
         activity=_activity(now),
+        signals=signals.evaluate(store.events_since(now - signals.LONGEST, signals.KINDS), now),
         recent=store.events(limit=12),
         storage={
-            "dialect": db.dialect,
-            "location": db.location,
+            **health,
             # A SQLite file on a host that wipes its disk on restart loses
             # accounts, history and this log. The operator has to know.
             "volatile": db.dialect == "sqlite" and current_app.config["EPHEMERAL_HOST"],
         },
+        private_networks=current_app.config["PRIVATE_NETWORKS"],
+        ca_file=bool(current_app.config["CA_FILE"]),
         retention_days=current_app.config["AUDIT_RETENTION_DAYS"],
         ip_header=current_app.config["CLIENT_IP_HEADER"],
         monthly_limit=current_app.config["CHECKS_PER_MONTH"],
@@ -166,27 +188,94 @@ def overview() -> str:
     )
 
 
+def _day(text: str) -> int:
+    """Unix time of a date typed as YYYY-MM-DD (UTC), or 0."""
+    try:
+        return int(datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=UTC).timestamp())
+    except ValueError:
+        return 0
+
+
+def _event_filters() -> tuple[dict[str, Any], dict[str, str]]:
+    """Filters for the store, and the same filters as typed, for the form and links."""
+    args = request.args
+    kind = args.get("kind", "")
+    form = {
+        "kind": kind if kind in EVENT_GROUPS or kind in _KNOWN_KINDS else "",
+        "q": args.get("q", "").strip()[:80],
+        "ip": args.get("ip", "").strip()[:64],
+        "login": args.get("login", "").strip()[:120],
+        "from": args.get("from", "").strip()[:10],
+        "to": args.get("to", "").strip()[:10],
+    }
+    until = _day(form["to"])
+    filters = {
+        "kind": form["kind"],
+        "text": form["q"],
+        "ip": form["ip"],
+        "login": form["login"],
+        "since": _day(form["from"]),
+        "until": until + DAY if until else 0,  # "to" includes that whole day
+    }
+    return filters, {k: v for k, v in form.items() if v}
+
+
+_KNOWN_KINDS = frozenset(signals.KINDS) | {"scan.finished", "scan.quota", "login.ok", "logout"}
+
+
 @bp.get("/events")
 @admin_required
 def events() -> str:
     svc = services()
-    kind = request.args.get("kind", "")
-    kind = kind if kind in EVENT_GROUPS else ""
-    text = request.args.get("q", "").strip()[:80]
+    filters, form = _event_filters()
     page = page_number()
-    rows = svc.store.events(kind=kind, text=text, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE)
-    total = svc.store.count_events(kind=kind, text=text)
+    rows = svc.store.events(limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE, **filters)
+    total = svc.store.count_events(**filters)
     return render_template(
         "admin_events.html",
         events=rows,
         total=total,
-        kind=kind,
-        q=text,
+        form=form,
         groups=EVENT_GROUPS,
         page=page,
         pages=max(1, -(-total // PAGE_SIZE)),
         retention_days=current_app.config["AUDIT_RETENTION_DAYS"],
     )
+
+
+def _cell(value: Any) -> str:
+    """A CSV cell that a spreadsheet will not run as a formula (CSV injection).
+
+    Login names, details and browser strings come from visitors. A cell that
+    starts with = + - @ or a control character is a formula to Excel and
+    LibreOffice; a leading apostrophe makes it text.
+    """
+    text = "" if value is None else str(value)
+    if text and text[0] in "=+-@\t\r":
+        return "'" + text
+    return text
+
+
+@bp.get("/events.csv")
+@admin_required
+def events_csv() -> Response:
+    filters, form = _event_filters()
+    rows = services().store.events(limit=CSV_LIMIT, **filters)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["time_utc", "event", "account", "ip", "country", "browser", "detail"])
+    for e in rows:
+        when = datetime.fromtimestamp(int(e["ts"]), UTC).strftime("%Y-%m-%d %H:%M:%S")
+        writer.writerow(
+            [when]
+            + [_cell(e[k]) for k in ("kind", "login", "ip", "country", "user_agent", "detail")]
+        )
+    audit("admin.export", f"audit log, {len(rows)} entries, filters {form or 'none'}")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+    # A byte order mark lets Excel recognise UTF-8 (umlauts, Cyrillic).
+    resp = Response("\ufeff" + buffer.getvalue(), mimetype="text/csv; charset=utf-8")
+    resp.headers["Content-Disposition"] = f'attachment; filename="audit-log-{stamp}.csv"'
+    return resp
 
 
 @bp.get("/scans")
@@ -199,6 +288,12 @@ def scans() -> str:
     return render_template(
         "admin_scans.html", scans=rows, page=page, pages=max(1, -(-total // PAGE_SIZE))
     )
+
+
+@bp.get("/servers")
+@admin_required
+def servers() -> str:
+    return render_template("servers.html", targets=services().store.targets(limit=500), mine=False)
 
 
 @bp.route("/users", methods=["GET", "POST"])

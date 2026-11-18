@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from tr02102_audit import rating
+from tr02102_audit import advice, compare, rating
 from tr02102_audit.standards import CATEGORIES, CONTROLS
-from tr02102_audit.web import i18n, views_account, views_public
+from tr02102_audit.web import i18n, reporting, signals, views_account, views_public
 from tr02102_audit.web.frameworks import FRAMEWORKS
 
 WEB = Path(i18n.__file__).parent
@@ -22,6 +22,13 @@ INDIRECT = [
     *views_public.DEMOS.values(),
     *views_account.TARGET_PROBLEMS.values(),
     *(f.asks for f in FRAMEWORKS),
+    # action plan, comparison, report formats, audit-log signals
+    *(text for pair in advice.ACTION_TEXT.values() for text in pair),
+    *advice.PRIORITY_TEXT.values(),
+    *(text for pair in advice.PROFILE_TEXT.values() for text in pair),
+    *(label for label, _ in (*compare._LISTS, *compare._VALUES)),
+    *reporting.FORMATS.values(),
+    *(text for rule in signals.RULES for text in (rule.title, rule.explanation)),
     # verdicts and finding states
     "Conforms",
     "Conforms, with warnings",

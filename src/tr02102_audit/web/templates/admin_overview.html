@@ -19,6 +19,32 @@
 </section>
 
 <section>
+  <h2>{{ _('Needs a look') }}</h2>
+  {% if signals %}
+    <p class="quiet">{{ _('Patterns in the audit log that are worth checking. A signal is a reason to look, not proof of an attack.') }}</p>
+    <ul class="signals">
+      {% for s in signals %}
+        <li class="sheet signal-{{ s.severity }}">
+          <div class="plan-head">
+            <span class="prio prio-{{ 'high' if s.severity == 'high' else 'medium' }}">{{ _('High') if s.severity == 'high' else _('Medium') }}</span>
+            <h3>{{ _(s.title) }}</h3>
+          </div>
+          <p class="small">{{ _(s.explanation) }}</p>
+          <p class="small">
+            {% if s.by == 'ip' %}{{ _('IP address') }}: <a class="code" href="{{ url_for('admin.events', ip=s.who) }}">{{ s.who }}</a>
+            {% else %}{{ _('Account') }}: <a href="{{ url_for('admin.events', login=s.who) }}">{{ s.who }}</a>{% endif %}
+            · {{ _('%(n)s in %(h)s hours', n=s.count, h=s.window_hours) }}
+            · {{ _('last') }} {{ s.last|when('%Y-%m-%d %H:%M') }} UTC
+          </p>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="note">{{ _('Nothing unusual in the audit log.') }}</p>
+  {% endif %}
+</section>
+
+<section>
   <h2>{{ _('Activity, last 14 days') }}</h2>
   <ul class="legend">
     <li><span class="s1"></span>{{ _('Checks started') }}</li>
@@ -69,7 +95,7 @@
   <div class="sheet">
     <h3>{{ _('Most active addresses, 7 days') }}</h3>
     {% if activity.addresses %}
-      <table><tbody>{% for ip, n in activity.addresses %}<tr><td><a class="code" href="{{ url_for('admin.events', q=ip) }}">{{ ip }}</a></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table>
+      <table><tbody>{% for ip, n in activity.addresses %}<tr><td><a class="code" href="{{ url_for('admin.events', ip=ip) }}">{{ ip }}</a></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table>
     {% else %}
       <p class="quiet small">{{ _('Nothing recorded yet.') }}</p>
     {% endif %}
@@ -100,7 +126,11 @@
   <div class="sheet">
     <h3>{{ _('This instance') }}</h3>
     <dl class="facts">
-      <dt>{{ _('Storage') }}</dt><dd>{{ storage.dialect }} <span class="quiet small code">{{ storage.location }}</span></dd>
+      <dt>{{ _('Storage') }}</dt><dd>{{ 'PostgreSQL' if storage.dialect == 'postgres' else 'SQLite' }} <span class="quiet small code">{{ storage.location }}</span></dd>
+      <dt>{{ _('Database') }}</dt><dd><span class="tag good">{{ _('reachable') }}</span> {{ _('%(ms)s ms, schema version %(v)s', ms=storage.latency_ms, v=storage.schema_version) }}</dd>
+      <dt>{{ _('Stored') }}</dt><dd class="small">{{ _('%(users)s accounts, %(scans)s checks, %(targets)s servers, %(events)s log entries', users=storage.users, scans=storage.scans, targets=storage.targets, events=storage.events) }}</dd>
+      <dt>{{ _('Private networks allowed') }}</dt><dd>{% if private_networks %}<span class="code small">{{ private_networks|join(', ') }}</span>{% else %}{{ _('none') }}{% endif %}</dd>
+      <dt>{{ _('Extra trusted CA') }}</dt><dd>{{ _('yes') if ca_file else _('no') }}</dd>
       <dt>{{ _('Audit log kept for') }}</dt><dd>{{ _('%(n)s days', n=retention_days) }}</dd>
       <dt>{{ _('Reports kept for') }}</dt><dd>{{ _('%(n)s days', n=report_days) }}</dd>
       <dt>{{ _('Visitor address from') }}</dt><dd>{{ ip_header or _('the TCP connection') }}</dd>

@@ -2,6 +2,8 @@
 
 import runpy
 import sys
+from importlib import resources
+from pathlib import Path
 
 import pytest
 
@@ -58,3 +60,14 @@ def test_package_is_runnable_as_module(
 
     assert excinfo.value.code == ExitCode.OK
     assert __version__ in capsys.readouterr().out
+
+
+def test_stored_scan_as_pdf(tmp_path: Path) -> None:
+    source = resources.files("tr02102_audit.web").joinpath("demo", "tls-typical.json")
+    stored = tmp_path / "scan.json"
+    stored.write_text(source.read_text("utf-8"), encoding="utf-8")
+    out = tmp_path / "report.pdf"
+    code = main(["evaluate", str(stored), "--format", "pdf", "--output", str(out)])
+    assert code in (0, 1)
+    assert out.read_bytes().startswith(b"%PDF")
+    assert main(["evaluate", str(stored), "--format", "pdf"]) == 2, "pdf needs --output"

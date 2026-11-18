@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "_macros.html" import grade_chip, verdict %}
+{% block title %}{{ target.label or target.host }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="{{ url_for('servers.servers') }}">{{ _('My servers') }}</a></p>
+<section class="server-head">
+  <div>
+    <h1>{{ target.label or target.host }}</h1>
+    <p class="code quiet">{{ target.host }}:{{ target.port }}</p>
+  </div>
+  {% if target.user_id == user.id %}
+  <form method="post" action="{{ url_for('servers.check', target_id=target.id) }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <button class="btn" type="submit">{{ _('Check again') }}</button>
+  </form>
+  {% endif %}
+</section>
+
+{% if trend|length > 1 %}
+<section>
+  <h2>{{ _('Rating over time') }}</h2>
+  <ol class="trend" aria-label="{{ _('Rating over time') }}">
+    {% for h in trend %}
+      <li><a href="{{ url_for('account.report_page', public_id=h.public_id) }}">{{ grade_chip(h.grade) }}<span class="small quiet">{{ h.created_at|when('%d.%m. %H:%M') }}</span></a></li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+
+<section>
+  <h2>{{ _('History') }}</h2>
+  {% if history %}
+  <form method="get" action="{{ url_for('servers.compare_page') }}">
+    <div class="sheet scroll">
+      <table>
+        <thead><tr>
+          {% if can_compare %}<th class="center">{{ _('Before') }}</th><th class="center">{{ _('After') }}</th>{% endif %}
+          <th>{{ _('Checked') }}</th><th>{{ _('Rating') }}</th><th>{{ _('Standards met') }}</th><th></th>
+        </tr></thead>
+        <tbody>
+          {% for h in history %}
+            <tr>
+              {% if can_compare %}
+                <td class="center">{% if h.status == 'done' %}<input type="radio" name="a" value="{{ h.public_id }}" aria-label="{{ _('Before') }}"{% if loop.index == 2 %} checked{% endif %}>{% endif %}</td>
+                <td class="center">{% if h.status == 'done' %}<input type="radio" name="b" value="{{ h.public_id }}" aria-label="{{ _('After') }}"{% if loop.first %} checked{% endif %}>{% endif %}</td>
+              {% endif %}
+              <td class="nowrap small">{{ h.created_at|when('%Y-%m-%d %H:%M') }}</td>
+              <td>{% if h.status == 'done' %}{{ grade_chip(h.grade) }}{% else %}<span class="tag">{{ _(h.status) }}</span>{% endif %}</td>
+              <td class="small">{% set met = h.verdicts.values()|select('in', ['pass', 'pass_with_warnings'])|list %}{{ _('%(met)s of %(all)s', met=met|length, all=h.verdicts|length) }}</td>
+              <td><a href="{{ url_for('account.report_page', public_id=h.public_id) }}">{{ _('Open report') }}</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if can_compare %}<p><br><button class="btn" type="submit">{{ _('Compare the two checks') }}</button></p>{% endif %}
+  </form>
+  {% else %}
+    <p class="quiet">{{ _('This server has not been checked yet.') }}</p>
+  {% endif %}
+</section>
+
+{% if target.user_id == user.id %}
+<section class="columns">
+  <form method="post" class="sheet stack">
+    <h3>{{ _('Settings') }}</h3>
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <div>
+      <label for="label">{{ _('Name in the list (optional)') }}</label>
+      <input id="label" name="label" type="text" maxlength="80" value="{{ target.label }}">
+    </div>
+    <fieldset>
+      <legend>{{ _('Compare with') }}</legend>
+      {% for s in standards %}
+        <label class="check"><input type="checkbox" name="standard" value="{{ s.id }}"{% if s.id in target.standards %} checked{% endif %}><span>{{ s.short_name }}</span></label>
+      {% endfor %}
+    </fieldset>
+    <div><button class="btn slim" type="submit">{{ _('Save') }}</button></div>
+  </form>
+  <div class="sheet">
+    <h3>{{ _('Remove from the list') }}</h3>
+    <p class="small quiet">{{ _('The reports stay; only the entry in the list is removed.') }}</p>
+    <form method="post" action="{{ url_for('servers.delete', target_id=target.id) }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <button class="btn danger slim" type="submit">{{ _('Remove') }}</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

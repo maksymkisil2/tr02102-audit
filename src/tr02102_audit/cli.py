@@ -14,7 +14,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from tr02102_audit import __version__, report, sarif
+from tr02102_audit import __version__, advice, report, sarif
 from tr02102_audit.exit_codes import ExitCode
 from tr02102_audit.netguard import TargetError, parse_target, resolve
 from tr02102_audit.scan import scan_tls
@@ -45,9 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "-f",
             "--format",
-            choices=("text", "json", "sarif"),
+            choices=("text", "json", "sarif", "pdf"),
             default="text",
-            help="sarif suits CI dashboards such as GitHub code scanning",
+            help="sarif suits CI dashboards such as GitHub code scanning; pdf needs --output",
         )
         p.add_argument("-o", "--output", type=Path, help="write the report to this file")
         p.add_argument(
@@ -97,17 +97,27 @@ def _select(ids: Sequence[str] | None) -> list[Standard]:
 
 
 def _emit(rep: dict[str, object], args: argparse.Namespace) -> int:
-    if args.format == "json":
-        text = json.dumps(rep, indent=2) + "\n"
-    elif args.format == "sarif":
-        text = json.dumps(sarif.build(rep), indent=2) + "\n"
-    else:
-        text = report.render_text(rep)
-    if args.output:
-        args.output.write_text(text, encoding="utf-8")
+    if args.format == "pdf":
+        if not args.output:
+            print("error: --format pdf needs --output FILE", file=sys.stderr)
+            return ExitCode.ERROR
+        from tr02102_audit.web import pdf  # reportlab is loaded only when needed
+
+        args.output.write_bytes(pdf.build(rep))
         args.output.chmod(0o600)  # reports describe weaknesses (threat T-07)
+        print(f"PDF report written to {args.output}", file=sys.stderr)
     else:
-        sys.stdout.write(text)
+        if args.format == "json":
+            text = json.dumps({**rep, "actions": advice.plan(rep)}, indent=2) + "\n"
+        elif args.format == "sarif":
+            text = json.dumps(sarif.build(rep), indent=2) + "\n"
+        else:
+            text = report.render_text(rep)
+        if args.output:
+            args.output.write_text(text, encoding="utf-8")
+            args.output.chmod(0o600)  # reports describe weaknesses (threat T-07)
+        else:
+            sys.stdout.write(text)
 
     if not rep["observation"]["complete"]:  # type: ignore[index]
         return ExitCode.ERROR

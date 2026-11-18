@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ _('About the project') }}{% endblock %}
+{% block content %}
+<section>
+  <h1>{{ _('About the project') }}</h1>
+  <p class="lead">{{ _('tr02102-audit is an open-source auditor for TLS configurations. It measures what a server accepts, judges the result against five published standards at once, and says what to change.') }}</p>
+  <nav class="toc" aria-label="{{ _('On this page') }}">
+    <a href="#principles">{{ _('Principles') }}</a>
+    <a href="#built">{{ _('How it is built') }}</a>
+    <a href="#limits">{{ _('Limits') }}</a>
+    <a href="#lab">{{ _('The lab') }}</a>
+  </nav>
+</section>
+
+<section id="principles">
+  <h2>{{ _('Principles') }}</h2>
+  <dl class="contents">
+    <div><dt>{{ _('Measure, do not guess') }}</dt><dd>{{ _('Every protocol version, cipher suite and group is tried in a real handshake. Nothing is inferred from a version banner.') }}</dd></div>
+    <div><dt>{{ _('Unknown is never a pass') }}</dt><dd>{{ _('What could not be measured is reported as unknown. A check with gaps gets no rating and no passing verdict.') }}</dd></div>
+    <div><dt>{{ _('Standards are data') }}</dt><dd>{{ _('Each standard is a file of rules under review like code. A rule cites its section and keeps the document’s level: required or recommended.') }}</dd></div>
+    <div><dt>{{ _('The tool protects itself') }}</dt><dd>{{ _('A hosted scanner could be misused against other networks. Private addresses are refused, every check is recorded, and a threat model covers 28 threats.') }}</dd></div>
+  </dl>
+</section>
+
+<section id="built">
+  <h2>{{ _('How it is built') }}</h2>
+  <ul class="plain-list">
+    <li>{{ _('Python. The TLS handshakes are built by hand, so no library decides what is offered or hides an answer.') }}</li>
+    <li>{{ _('A pure rule engine: the same measurement always gives the same verdict, and a stored check can be judged again.') }}</li>
+    <li>{{ _('The scanner’s facts are checked against OpenSSL on public servers, and the lab servers are scanned on every change.') }}</li>
+    <li>{{ _('This website uses no JavaScript and no tracking. Accounts are stored in SQLite or PostgreSQL; passwords as scrypt hashes.') }}</li>
+    <li>{{ _('Command line, web interface, PDF, JSON and SARIF output come from the same report.') }}</li>
+  </ul>
+</section>
+
+<section id="limits">
+  <h2>{{ _('Limits') }}</h2>
+  <ul class="plain-list">
+    <li>{{ _('A report is technical evidence about one address at one moment. It is not a certificate and does not replace an audit.') }}</li>
+    <li>{{ _('It is a view from outside. Servers behind one address may be configured differently.') }}</li>
+    <li>{{ _('Only TLS for now. SSH and IPsec, the other parts of TR-02102, are planned.') }}</li>
+    <li>{{ _('The BSI, NCSC-NL and Mozilla rule sets are still drafts until each rule has been checked line by line against the official document.') }}</li>
+  </ul>
+</section>
+
+<section id="lab">
+  <h2>{{ _('The lab') }}</h2>
+  <p>{{ _('The lab runs this web interface together with test servers on your own computer. One of them is yours: change its configuration and watch how the result changes.') }}</p>
+  <ol class="steps steps-tight">
+    <li><h3>{{ _('Install') }}</h3><p>{{ _('Docker Desktop (Windows, macOS) or Docker Engine (Linux), and Git.') }}</p></li>
+    <li><h3>{{ _('Start') }}</h3><pre><code>git clone https://github.com/maksymkisil2/tr02102-audit
+cd tr02102-audit
+docker compose -f lab/docker-compose.yml up -d --build</code></pre></li>
+    <li><h3>{{ _('Sign in') }}</h3><p>{{ _('Open http://127.0.0.1:8080 and sign in as admin with the password lab-admin-password. It is for the lab on your computer only.') }}</p></li>
+    <li><h3>{{ _('Check') }}</h3><p>{{ _('Check my-site, and keep it in your list. The other lab servers are tls-good, tls-typical and tls-weak.') }}</p></li>
+    <li><h3>{{ _('Change and compare') }}</h3><pre><code># lab/targets/my-site/nginx.conf
+docker compose -f lab/docker-compose.yml restart my-site</code></pre><p>{{ _('Then press “Check again” and compare the two checks.') }}</p></li>
+  </ol>
+</section>
+{% endblock %}

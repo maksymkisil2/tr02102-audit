@@ -153,7 +153,7 @@ def test_wrong_password_and_unknown_login_get_the_same_answer(
     assert details["wrong password"] == ADMIN
     # A login nobody owns may be a password typed into the wrong field: only
     # its first two characters are written down.
-    assert details["unknown login name"] == "my… (27 characters)"
+    assert re.fullmatch(r"my… \(27 characters, #[0-9a-f]{4}\)", details["unknown login name"])
 
 
 def test_failed_sign_ins_are_rate_limited(app: Flask, client: FlaskClient) -> None:
@@ -791,3 +791,158 @@ def test_first_administrator_is_created_once_and_can_be_reset(
     reset = make_app(**settings, APP_PASSWORD="a different passphrase", ADMIN_RESET=True)
     assert sign_in(reset.test_client(), "root", "a different passphrase").status_code == 302
     assert services(reset).store.count_users() == 1
+
+
+# ------------------------------------------------- formats, servers, comparison
+
+
+def test_format_chosen_before_the_check_is_offered_when_it_is_done(app: Flask) -> None:
+    client = user_client(app)
+    url = start_scan(client, output="pdf").headers["Location"]
+    html = wait_for_report(client, url)
+    assert "Your report is ready." in html
+    assert f'href="{url}.pdf"' in html
+    assert "What to do, in this order" in html and "Recommended configuration" in html
+    pdf = client.get(url + ".pdf")
+    assert pdf.mimetype == "application/pdf" and pdf.data.startswith(b"%PDF")
+    assert "attachment" in pdf.headers["Content-Disposition"]
+    data = client.get(url + ".json").get_json()
+    assert data["actions"] and data["actions"][0]["priority"] in (
+        "critical",
+        "high",
+        "medium",
+        "low",
+    )
+    row = services(app).store.scan(url.rsplit("/", 1)[1])
+    assert row is not None and row["output"] == "pdf"
+    # An unknown format falls back to the web page.
+    other = start_scan(client, output="exe").headers["Location"]
+    assert "Your report is ready." not in wait_for_report(client, other)
+
+
+def test_demo_reports_come_as_pdf_too(client: FlaskClient) -> None:
+    resp = client.get("/demo/tls-typical.pdf?lang=de")
+    assert resp.mimetype == "application/pdf" and resp.data.startswith(b"%PDF")
+    assert client.get("/demo/tls-typical.exe").status_code == 404
+
+
+def test_keeping_a_server_checking_it_again_and_comparing(app: Flask) -> None:
+    client = user_client(app)
+    first = start_scan(client, keep="yes", label="Lab nginx").headers["Location"]
+    wait_for_report(client, first)
+    servers = text(client.get("/servers"))
+    assert "Lab nginx" in servers and "1.1.1.1:443" in servers
+    target = services(app).store.targets()[0]
+    again = post(client, f"/servers/{target['id']}/check", form_page="/servers")
+    assert again.status_code == 302
+    second = again.headers["Location"]
+    html = wait_for_report(client, second)
+    assert "Compare with the previous check" in html
+    a, b = first.rsplit("/", 1)[1], second.rsplit("/", 1)[1]
+    compared = text(client.get(f"/compare?a={b}&b={a}"))  # order does not matter
+    assert "Nothing changed between the two checks." in compared
+    history = text(client.get(f"/servers/{target['id']}"))
+    assert "Compare the two checks" in history and history.count('name="a"') == 2
+    post(client, f"/servers/{target['id']}", label="Renamed", standard=["ietf-rfc9325"])
+    renamed = services(app).store.target(target["id"])
+    assert renamed is not None and renamed["label"] == "Renamed"
+    assert renamed["standards"] == ["ietf-rfc9325"]
+    post(client, f"/servers/{target['id']}/delete", form_page=f"/servers/{target['id']}")
+    assert services(app).store.target(target["id"]) is None
+    assert client.get(first).status_code == 200, "removing a server keeps its reports"
+
+
+def test_servers_and_comparisons_belong_to_their_owner(app: Flask) -> None:
+    anna = user_client(app, "anna@example.org")
+    boris = user_client(app, "boris@example.org")
+    url = start_scan(anna, keep="yes").headers["Location"]
+    wait_for_report(anna, url)
+    mine = wait_for_report(boris, start_scan(boris).headers["Location"])
+    assert mine
+    target = services(app).store.targets()[0]
+    for path in (f"/servers/{target['id']}",):
+        assert boris.get(path).status_code == 404
+    assert post(boris, f"/servers/{target['id']}/check", form_page="/servers").status_code == 404
+    assert post(boris, f"/servers/{target['id']}/delete", form_page="/servers").status_code == 404
+    boris_user = services(app).store.user_by_login("boris@example.org")
+    assert boris_user is not None
+    own = services(app).store.scans(user_id=boris_user["id"])
+    foreign = url.rsplit("/", 1)[1]
+    assert boris.get(f"/compare?a={foreign}&b={own[0]['public_id']}").status_code == 404
+    assert "1.1.1.1" not in text(boris.get("/servers"))
+    admin = app.test_client()
+    sign_in(admin)
+    assert "anna@example.org" in text(admin.get("/admin/servers"))
+    assert admin.get(f"/servers/{target['id']}").status_code == 200
+
+
+def test_lab_networks_can_be_allowed(make_app: AppFactory) -> None:
+    app = make_app(PRIVATE_NETWORKS="10.0.0.0/24")
+    client = user_client(app)
+    assert "10.0.0.0/24" in text(client.get("/scan"))
+    allowed = start_scan(client, target="10.0.0.5:8443")
+    assert allowed.status_code == 302
+    refused = start_scan(client, target="10.0.1.5")
+    assert "Only public addresses can be checked here." in text(refused)
+    admin = app.test_client()
+    sign_in(admin)
+    assert "10.0.0.0/24" in text(admin.get("/admin"))
+
+
+# ---------------------------------------------------------- audit log tools
+
+
+def test_audit_log_filters_and_csv_export(app: Flask) -> None:
+    store = services(app).store
+    store.add_event("login.failed", login="=HYPERLINK(1)", ip="203.0.113.7", detail="+cmd")
+    store.add_event("login.failed", login="anna", ip="198.51.100.1")
+    client = app.test_client()
+    sign_in(client)
+    page = text(client.get("/admin/events?ip=203.0.113.7"))
+    assert "=HYPERLINK(1)" in page and "anna" not in page.split("<tbody>")[1]
+    assert "1 entries" in page
+    assert "anna" in text(client.get("/admin/events?login=anna&from=2000-01-01&to=2100-01-01"))
+    assert "Nothing recorded yet." in text(client.get("/admin/events?to=2000-01-01"))
+    assert client.get("/admin/events?from=nonsense").status_code == 200
+    csv_resp = client.get("/admin/events.csv?ip=203.0.113.7")
+    assert csv_resp.mimetype == "text/csv"
+    body = csv_resp.get_data(as_text=True)
+    assert body.startswith("﻿time_utc,event,account,ip")
+    # Visitor text that a spreadsheet would run as a formula is written as text.
+    assert "'=HYPERLINK(1)" in body and "'+cmd" in body
+    assert events(app, "admin.export")
+    assert user_client(app).get("/admin/events.csv").status_code == 403
+
+
+def test_overview_shows_signals_and_database_health(app: Flask) -> None:
+    for n in range(6):
+        stranger = app.test_client()
+        stranger.post(
+            "/login",
+            data={"csrf": csrf(stranger), "login": f"guess{n}", "password": "x"},
+            environ_base={"REMOTE_ADDR": "203.0.113.9"},
+        )
+    admin = app.test_client()
+    admin.post(
+        "/login",
+        data={"csrf": csrf(admin), "login": ADMIN, "password": ADMIN_PASSWORD},
+        environ_base={"REMOTE_ADDR": "198.51.100.200"},
+    )
+    html = text(admin.get("/admin"))
+    assert "Many failed sign-ins from one address" in html
+    assert "One address tries many login names" in html
+    assert 'href="/admin/events?ip=203.0.113.9"' in html
+    assert "reachable" in html and "schema version 2" in html
+
+
+def test_about_page_and_start_page_blocks(client: FlaskClient) -> None:
+    home = text(client.get("/"))
+    for heading in (
+        "The idea",
+        "What a report contains",
+        "Who it is for",
+        "Practise on your own server",
+    ):
+        assert heading in home
+    about = text(client.get("/about?lang=uk"))
+    assert "Про проєкт" in about and "lab-admin-password" in about

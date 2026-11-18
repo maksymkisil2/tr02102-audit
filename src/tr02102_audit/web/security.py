@@ -76,16 +76,20 @@ def session_stamp(password_hash: str) -> str:
     return hashlib.sha256(password_hash.encode()).hexdigest()[:16]
 
 
-def mask_login(text: str) -> str:
+def mask_login(text: str, key: bytes = b"") -> str:
     """Shorten a login name nobody owns before it is written to the audit log.
 
     People type passwords into the wrong field. Keeping only the first two
-    characters still shows what an attacker is guessing ("ad…", "ro…").
+    characters still shows what an attacker is guessing ("ad…", "ro…"). A
+    four-character keyed hash tells different names apart, so one address
+    trying many names (password spraying) stays visible; with 65,536 values
+    and the instance's secret as key it does not reveal the name.
     """
     text = text.strip()
     if not text:
         return "(empty)"
-    return f"{text[:2]}… ({len(text)} characters)"
+    tag = hmac.new(key, text.encode(), hashlib.sha256).hexdigest()[:4]
+    return f"{text[:2]}… ({len(text)} characters, #{tag})"
 
 
 class RateLimiter:
