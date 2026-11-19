@@ -81,10 +81,26 @@ def _validate_host(host: str) -> None:
             raise TargetError("not a valid host name or IP address") from None
 
 
-def is_public(address: str) -> bool:
+# IPv6 prefixes whose last 32 bits are an IPv4 address that a connection can
+# end up at. ``ipaddress`` calls the NAT64 prefix global, which is right for
+# routing but not here: behind a NAT64 gateway, 64:ff9b::7f00:1 is 127.0.0.1.
+_EMBEDS_IPV4 = (
+    ipaddress.IPv6Network("::ffff:0:0/96"),  # IPv4-mapped (RFC 4291)
+    ipaddress.IPv6Network("64:ff9b::/96"),  # NAT64 well-known prefix (RFC 6052)
+    ipaddress.IPv6Network("::/96"),  # IPv4-compatible, deprecated (RFC 4291)
+)
+
+
+def _effective(address: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """The address a connection reaches: the embedded IPv4 one, if there is one."""
     ip = ipaddress.ip_address(address)
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
+    if isinstance(ip, ipaddress.IPv6Address) and any(ip in net for net in _EMBEDS_IPV4):
+        return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    return ip
+
+
+def is_public(address: str) -> bool:
+    ip = _effective(address)
     return ip.is_global and not ip.is_multicast
 
 
@@ -100,9 +116,7 @@ def parse_networks(text: str) -> tuple[Network, ...]:
 
 
 def _allowed(address: str, networks: Sequence[Network]) -> bool:
-    ip = ipaddress.ip_address(address)
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
+    ip = _effective(address)
     return any(ip in network for network in networks)
 
 

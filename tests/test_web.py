@@ -533,7 +533,16 @@ def test_scan_form_needs_a_standard_and_the_authorisation(app: Flask) -> None:
 
 
 @pytest.mark.parametrize(
-    "target", ["127.0.0.1", "localhost", "169.254.169.254", "10.0.0.1:8443", "[::1]", "0.0.0.0"]
+    "target",
+    [
+        "127.0.0.1",
+        "localhost",
+        "169.254.169.254",
+        "10.0.0.1:8443",
+        "[::1]",
+        "0.0.0.0",
+        "[64:ff9b::a9fe:a9fe]",  # cloud metadata through NAT64
+    ],
 )
 def test_private_targets_are_refused_and_logged(app: Flask, target: str) -> None:
     client = user_client(app)
