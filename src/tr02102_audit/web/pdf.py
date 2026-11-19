@@ -273,6 +273,13 @@ def build(report: Mapping[str, Any], tr: Translate = _english) -> bytes:
             missing = "; ".join(tr(b["title"]) for b in rate["bonus_missing"])
             line += " " + escape(tr("An A+ would also need:") + " " + missing) + "."
         story.append(Paragraph(line, st["lead"]))
+    elif rate.get("at_best") is None:
+        story.append(
+            _p(
+                tr("Not rated.") + " " + tr("Nothing could be measured, so there is no rating."),
+                st["lead"],
+            )
+        )
     else:
         story.append(
             _p(

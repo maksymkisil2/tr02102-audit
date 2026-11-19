@@ -83,6 +83,23 @@ def _derive(tls: prober.TlsFacts) -> dict[str, Any]:
     }
 
 
+def _unknown() -> dict[str, Any]:
+    """The fact tree of a scan that measured nothing: every value undetermined.
+
+    An aborted scan (connection refused, deadline reached) leaves ``TlsFacts``
+    empty. Derived from that, empty lists would read as measurements ("no TLS
+    1.3", "no forward secrecy") and turn into failures. ``None`` keeps them
+    unknown, so the engine reports every rule as inconclusive.
+    """
+    tree = _derive(prober.TlsFacts())
+    unknown: dict[str, Any] = dict.fromkeys(tree)
+    unknown["protocol_versions_inconclusive"] = []
+    unknown["version_probes"] = {}
+    unknown["suites"] = dict.fromkeys(tree["suites"])
+    unknown["groups"] = dict.fromkeys(tree["groups"])
+    return unknown
+
+
 def scan_tls(
     target: ResolvedTarget, limits: prober.Limits | None = None, *, ca_file: str | None = None
 ) -> dict[str, Any]:
@@ -101,7 +118,7 @@ def scan_tls(
         aborted = str(exc)
         tls = prober.TlsFacts()
 
-    facts: dict[str, Any] = {"tls": _derive(tls), "certificate": None}
+    facts: dict[str, Any] = {"tls": _unknown() if aborted else _derive(tls), "certificate": None}
 
     if not aborted and tls.versions:
         leaf = tls.certificate_chain[0] if tls.certificate_chain else None
@@ -124,7 +141,7 @@ def scan_tls(
     incomplete = list(dict.fromkeys(session.incomplete))
     if aborted:
         notes.insert(0, f"scan aborted: {aborted}")
-    if not facts["tls"]["protocol_versions"] and not aborted:
+    if not aborted and not facts["tls"]["protocol_versions"]:
         notes.append("no TLS version was accepted; is this a TLS service?")
 
     return {

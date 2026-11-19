@@ -1,8 +1,10 @@
 """Web interface: accounts, roles, limits, the audit log, languages, headers."""
 
 import re
+import socket
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from flask import Flask
@@ -24,6 +26,8 @@ from tests.conftest import (
     wait_for_event,
     wait_for_report,
 )
+from tr02102_audit.netguard import ResolvedTarget, resolve
+from tr02102_audit.scan import scan_tls
 from tr02102_audit.web.store import StoreError
 
 PUBLIC_PAGES = (
@@ -839,6 +843,29 @@ def test_report_page_leads_with_figures_and_folds_the_details(client: FlaskClien
     assert '<details class="sheet standard" id="bsi-tr-02102-2" open' not in html
     assert "not applicable to this server" in html
     assert "1 warnings" not in html
+
+
+def _unreachable_scan(target: ResolvedTarget) -> dict[str, Any]:
+    """A real scan of a closed local port, reported under the requested target."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    observation = scan_tls(resolve("127.0.0.1", port, allow_private=True))
+    observation["target"] = {
+        "host": target.host,
+        "port": target.port,
+        "ip": target.ip,
+        "sni": target.sni,
+    }
+    return observation
+
+
+def test_unreachable_server_is_not_rated_and_fails_nothing(make_app: AppFactory) -> None:
+    client = user_client(make_app(SCAN_FN=_unreachable_scan))
+    html = wait_for_report(client, start_scan(client).headers["Location"])
+    assert "Nothing could be measured, so there is no rating." in html
+    assert "at best" not in html and "Could not be checked:" not in html
+    assert "Does not conform" not in html
 
 
 def test_server_without_main_steps_shows_the_low_ones_open(client: FlaskClient) -> None:

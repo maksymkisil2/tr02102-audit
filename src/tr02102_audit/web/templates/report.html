@@ -59,7 +59,9 @@
     <h1 class="code">{{ t.host }}:{{ t.port }}</h1>
     <p class="quiet small">{{ t.ip }}, {{ _('checked') }} {{ obs.collected_at|replace('T', ' ')|replace('+00:00', ' UTC') }}, {{ _('%(n)s connections', n=obs.connections) }}, {{ _('evaluated') }} {{ r.evaluated_on }}</p>
 
-    {% if rate.grade is none %}
+    {% if rate.grade is none and rate.at_best is none %}
+      <p><strong>{{ _('Not rated.') }}</strong> {{ _('Nothing could be measured, so there is no rating.') }}</p>
+    {% elif rate.grade is none %}
       <p><strong>{{ _('Not rated.') }}</strong> {{ _('The check left something open, and an unknown is never counted as good. On what was measured the rating would be %(grade)s at best.', grade=rate.at_best) }}</p>
     {% elif not rate.reasons %}
       <p><strong>{{ _('No weakness found.') }}</strong>
@@ -75,7 +77,7 @@
         {% endfor %}
       </ul>
     {% endif %}
-    {% for item in rate.unknown %}
+    {% for item in rate.unknown if rate.at_best is not none %}
       <p class="quiet small">{{ _('Could not be checked:') }} {{ _(item.title) }}</p>
     {% endfor %}
 
