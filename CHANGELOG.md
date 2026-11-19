@@ -10,6 +10,11 @@ Planned: SSH (BSI TR-02102-4) and IPsec (BSI TR-02102-3) collectors, a
 cryptographic bill of materials, and a line-by-line review of the BSI,
 NCSC-NL and Mozilla transcriptions.
 
+## [0.3.2] - 2026-11-19
+
+Scans of servers that cannot be measured are reported honestly, and the
+SSRF guard closes a gap for IPv6 addresses that carry an IPv4 address.
+
 ### Fixed
 
 - A server that could not be reached failed NIST SP 800-52r2 and RFC 9325
@@ -24,6 +29,11 @@ NCSC-NL and Mozilla transcriptions.
 - A server that accepts connections but never answers held a scan for
   about 100 seconds. The scan now stops after TLS 1.2 and TLS 1.3 get no
   answer, in about a third of the time ([#19]).
+
+### Changed
+
+- Dependencies: cryptography 50.0.2, gunicorn 27.0.1, MarkupSafe 3.0.4,
+  pycparser 3.12; Ruff 0.17.5 for development.
 
 ## [0.3.1] - 2026-11-18
 
@@ -301,7 +311,8 @@ standards, from a terminal, a web interface or a CI pipeline.
 - The hosted web service keeps jobs, reports and rate limits in process
   memory, which suits a single instance.
 
-[Unreleased]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.1.0...v0.2.0
