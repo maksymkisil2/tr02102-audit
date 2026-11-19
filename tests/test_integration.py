@@ -205,6 +205,22 @@ def test_closed_port_is_neither_a_pass_nor_a_fail() -> None:
     assert levels == {"note"}  # unknowns stay notes, never errors or warnings
 
 
+def test_a_silent_server_is_given_up_after_tls_1_2_and_1_3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A tarpit accepts connections and never answers. Probing every version
+    # with retries would hold the scan (and a web worker) for minutes.
+    monkeypatch.setattr(prober, "RETRY_PAUSE", 0.0)
+    with socket.socket() as tarpit:
+        tarpit.bind(("127.0.0.1", 0))
+        tarpit.listen(32)
+        target = resolve("127.0.0.1", tarpit.getsockname()[1], allow_private=True)
+        obs = scan_tls(target, prober.Limits(read_timeout=0.2))
+    assert obs["connections"] == 1 + 2 * (1 + prober.RETRIES)  # reachability, TLS 1.2, TLS 1.3
+    assert "does not answer TLS handshakes (timeout)" in obs["notes"][0]
+    assert not obs["complete"] and obs["facts"]["tls"]["protocol_versions"] is None
+
+
 class _ScriptedSession:
     """Stands in for a Session: answers probes from a fixed script."""
 

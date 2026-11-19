@@ -332,10 +332,18 @@ def collect(session: Session) -> TlsFacts:
         if outcome.kind == "inconclusive":
             session.incomplete.append(f"{version}: no answer ({outcome.reason})")
 
-    # 1. Which protocol versions are accepted?
-    for version in (Version.SSL3, Version.TLS10, Version.TLS11, Version.TLS12):
-        record_version(version, session.probe(legacy_spec(version, legacy_codes)))
+    # 1. Which protocol versions are accepted? TLS 1.2 and 1.3 come first: if
+    # neither gets an answer, the endpoint does not speak TLS (a tarpit, or a
+    # service that waits for its client), and every further probe would only
+    # wait for its timeout too.
+    tls12 = session.probe(legacy_spec(Version.TLS12, legacy_codes))
     outcome = session.probe(tls13_spec(list(TLS13_SUITES)))
+    if tls12.kind == "inconclusive" and outcome.kind == "inconclusive":
+        reasons = ", ".join(dict.fromkeys((tls12.reason, outcome.reason)))
+        raise ScanAbortedError(f"the server does not answer TLS handshakes ({reasons})")
+    for version in (Version.SSL3, Version.TLS10, Version.TLS11):
+        record_version(version, session.probe(legacy_spec(version, legacy_codes)))
+    record_version(Version.TLS12, tls12)
     if not is_version(outcome, Version.TLS13):
         # Asking the server to choose a group (empty key_share) is valid TLS 1.3,
         # but a stack that mishandles it must not be reported as "no TLS 1.3".
