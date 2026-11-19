@@ -14,11 +14,12 @@ from typing import Any
 
 import pytest
 
-from tr02102_audit import report
+from tr02102_audit import report, sarif
 from tr02102_audit.netguard import resolve
 from tr02102_audit.scan import scan_tls
 from tr02102_audit.standards import defaults, load_builtin
 from tr02102_audit.tls import prober, wire
+from tr02102_audit.web import pdf
 
 OPENSSL = shutil.which("openssl")
 pytestmark = pytest.mark.skipif(OPENSSL is None, reason="openssl binary not available")
@@ -186,12 +187,22 @@ def test_server_without_forward_secrecy(lab: dict[str, int | str]) -> None:
     assert rep["rating"]["grade"] == "C"
 
 
-def test_closed_port_is_never_a_pass() -> None:
+def test_closed_port_is_neither_a_pass_nor_a_fail() -> None:
+    # Nothing was measured, so nothing may be judged: an unreachable server
+    # must not "fail" NIST for lacking TLS 1.3 or get rating reasons.
     obs = scan_tls(resolve("127.0.0.1", _free_port(), allow_private=True))
     assert not obs["complete"] and obs["connections"] == 1  # gives up at once
     rep = report.build(obs, list(load_builtin().values()))
-    assert all(e["verdict"] not in ("pass", "pass_with_warnings") for e in rep["evaluations"])
-    assert rep["rating"]["grade"] is None
+    assert {e["verdict"] for e in rep["evaluations"]} == {"incomplete"}
+    statuses = {f["status"] for e in rep["evaluations"] for f in e["findings"]}
+    assert statuses <= {"inconclusive", "not_applicable"}, statuses
+    assert rep["rating"]["grade"] is None and rep["rating"]["at_best"] is None
+    assert rep["rating"]["reasons"] == []
+    text = report.render_text(rep)
+    assert "nothing could be measured" in text and "could not be checked" not in text
+    assert pdf.build(rep).startswith(b"%PDF")
+    levels = {r["level"] for r in sarif.build(rep)["runs"][0]["results"]}
+    assert levels == {"note"}  # unknowns stay notes, never errors or warnings
 
 
 class _ScriptedSession:

@@ -79,17 +79,21 @@ def rate(observation: Mapping[str, Any], today: date | None = None) -> dict[str,
 
     ``grade`` is None when the scan left something open that could lower the
     grade: an unknown is never rounded up. ``at_best`` then says how good the
-    grade can still be. A definite F is reported even for an incomplete scan,
-    because more data cannot repair it.
+    grade can still be, or is None when not a single criterion could be
+    checked (an aborted scan). A definite F is reported even for an incomplete
+    scan, because more data cannot repair it.
     """
     today = today or date.today()
     facts = observation["facts"]
     scale = load()
     reasons: list[dict[str, Any]] = []
     unknown: list[dict[str, Any]] = []
+    checked = 0  # criteria that could be decided either way
     for cap in scale.caps:
         result = _status(cap, facts, today)
         entry = {"id": cap.id, "grade": cap.grade, "title": cap.title}
+        if result.status in ("pass", "fail"):
+            checked += 1
         if result.status == "fail":
             detail = cap.check.get("detail")
             found = engine.lookup(facts, detail) if isinstance(detail, str) else None
@@ -107,6 +111,16 @@ def rate(observation: Mapping[str, Any], today: date | None = None) -> dict[str,
     ]
     if at_best == "A" and not bonus_missing:
         at_best = "A+"
+
+    if not checked:
+        # Nothing was measured: "at best A+" would be true but meaningless.
+        return {
+            "grade": None,
+            "at_best": None,
+            "reasons": [],
+            "unknown": unknown,
+            "bonus_missing": [],
+        }
 
     open_questions = [u for u in unknown if rank[u["grade"]] > rank[at_best]]
     complete = bool(observation.get("complete", True))

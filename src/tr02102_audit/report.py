@@ -131,7 +131,7 @@ def render_text(report: dict[str, Any]) -> str:
         f"Target      {_clean(t['host'])}:{t['port']} ({t['ip']})",
         f"Scanned     {obs['collected_at']}  ·  {obs['connections']} connections"
         f"  ·  {obs['duration_s']} s",
-        f"Versions    {', '.join(tls['protocol_versions']) or 'none'}",
+        f"Versions    {', '.join(tls['protocol_versions'] or []) or 'none'}",
     ]
     if cert:
         key = f"{cert['key_type']} {cert['key_bits']}" + (
@@ -147,12 +147,18 @@ def render_text(report: dict[str, Any]) -> str:
         lines.append(f"Incomplete  {_clean(reason)}")
 
     rate = report["rating"]
-    grade = rate["grade"] or f"not rated (at best {rate['at_best']})"
+    if rate["grade"]:
+        grade = rate["grade"]
+    elif rate["at_best"]:
+        grade = f"not rated (at best {rate['at_best']})"
+    else:
+        grade = "not rated (nothing could be measured)"
     lines += ["", f"Rating      {grade}   (the tool's own summary, not part of a standard)"]
     for reason in rate["reasons"]:
         lines.append(f"            {reason['grade']}: {reason['title']}")
-    for item in rate["unknown"]:
-        lines.append(f"            ?: could not be checked: {item['title']}")
+    if rate["at_best"]:  # with nothing measured, the list would name every criterion
+        for item in rate["unknown"]:
+            lines.append(f"            ?: could not be checked: {item['title']}")
 
     comp = report["comparison"]
     width = max(len(r["label"]) for r in comp["rows"]) if comp["rows"] else 10

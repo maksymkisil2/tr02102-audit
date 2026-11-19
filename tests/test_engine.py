@@ -299,6 +299,11 @@ def test_rating_names_the_reasons_worst_first() -> None:
     assert result["reasons"][0]["evidence"] == [rc4]
 
 
+def test_nothing_measured_gives_no_grade_and_no_best_case() -> None:
+    result = rating.rate({"complete": False, "facts": {"tls": {}, "certificate": None}}, D2026)
+    assert (result["grade"], result["at_best"], result["reasons"]) == (None, None, [])
+
+
 def test_an_unknown_is_never_rounded_up_to_a_grade() -> None:
     unknown_trust = facts()
     unknown_trust["certificate"]["trusted"] = None
