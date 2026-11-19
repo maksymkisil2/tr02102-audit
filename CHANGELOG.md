@@ -10,6 +10,21 @@ Planned: SSH (BSI TR-02102-4) and IPsec (BSI TR-02102-3) collectors, a
 cryptographic bill of materials, and a line-by-line review of the BSI,
 NCSC-NL and Mozilla transcriptions.
 
+### Fixed
+
+- A server that could not be reached failed NIST SP 800-52r2 and RFC 9325
+  ("TLS 1.3 is supported", "Forward secrecy is supported") and got rating
+  reasons, as if it had been measured. Every fact of an aborted scan is now
+  unknown: all verdicts are incomplete, and the report says that nothing
+  could be measured ([#17]).
+- Security: the web service accepted IPv6 addresses that carry a private
+  IPv4 address, such as the NAT64 address `64:ff9b::a9fe:a9fe` of the cloud
+  metadata service. NAT64 and IPv4-compatible addresses are now judged by
+  the IPv4 address inside, as IPv4-mapped ones already were ([#18]).
+- A server that accepts connections but never answers held a scan for
+  about 100 seconds. The scan now stops after TLS 1.2 and TLS 1.3 get no
+  answer, in about a third of the time ([#19]).
+
 ## [0.3.1] - 2026-11-18
 
 Reports are easier to read: the key figures come first, the details stay
@@ -291,3 +306,6 @@ standards, from a terminal, a web interface or a CI pipeline.
 [0.3.0]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/maksymkisil2/tr02102-audit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/maksymkisil2/tr02102-audit/releases/tag/v0.1.0
+[#17]: https://github.com/maksymkisil2/tr02102-audit/issues/17
+[#18]: https://github.com/maksymkisil2/tr02102-audit/issues/18
+[#19]: https://github.com/maksymkisil2/tr02102-audit/issues/19
