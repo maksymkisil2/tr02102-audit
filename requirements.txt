@@ -16,5 +16,5 @@ psycopg==3.3.9
 psycopg-binary==3.3.9
 pycparser==3.12
 PyYAML==6.0.3
-reportlab==5.0.1
+reportlab==5.1.0
 Werkzeug==3.1.9
