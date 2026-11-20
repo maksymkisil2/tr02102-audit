@@ -2,7 +2,7 @@
 # Dependabot proposes updates; CI tests every change before it is merged.
 blinker==1.9.0
 cffi==2.1.1
-charset-normalizer==3.5.1
+charset-normalizer==3.5.2
 click==8.5.1
 cryptography==50.0.2
 Flask==3.1.3
