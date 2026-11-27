@@ -205,6 +205,10 @@ Interface texts live in `src/tr02102_audit/web/locale/<language>.json`. A test f
 
 ## Roadmap
 
+The next concrete steps are tracked as a checklist in [ROADMAP.md](ROADMAP.md). An
+[automated workflow](.github/autodev/AGENT.md) takes the first open task each weekday and
+proposes it as a pull request; every change is reviewed and merged by hand.
+
 | Milestone | Scope | Status |
 |---|---|---|
 | M0 | Repository, CI, test lab | Done |
