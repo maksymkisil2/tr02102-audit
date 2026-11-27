@@ -10,7 +10,7 @@ gunicorn==27.0.1
 itsdangerous==2.2.0
 Jinja2==3.1.6
 MarkupSafe==3.0.4
-packaging==26.3
+packaging==26.4
 pillow==13.0.0
 psycopg==3.3.9
 psycopg-binary==3.3.9
