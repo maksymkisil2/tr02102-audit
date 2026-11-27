@@ -37,3 +37,6 @@ lab/certs/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Context prepared by the autodev workflow (never committed)
+.autodev/

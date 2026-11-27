@@ -1,0 +1,96 @@
+name: autodev
+
+# Autonomous developer. Every weekday morning it takes the first open task from
+# ROADMAP.md and delivers it as one pull request, or continues the open autodev
+# pull request when its checks fail or changes were requested. The agent's rules
+# are in .github/autodev/AGENT.md; the scripts next to it enforce the parts that
+# must not depend on the agent (no pushes to main, no secrets, no co-authors).
+#
+# Needs the Claude GitHub App on this repository and the repository secret
+# CLAUDE_CODE_OAUTH_TOKEN (created with `claude setup-token`).
+
+on:
+  schedule:
+    # 06:00 UTC = 07:00 in Berlin in winter, 08:00 in summer.
+    - cron: "0 6 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autodev
+  cancel-in-progress: false
+
+env:
+  # Commits are authored as the maintainer, so the history in main is his.
+  AUTHOR_NAME: maksymkisil2
+  AUTHOR_ID: "356212547"
+
+jobs:
+  autodev:
+    name: Work on the roadmap
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      # This token only plans and checks. The agent pushes and opens pull
+      # requests with the Claude GitHub App token, so CI runs on them.
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Decide what to do today
+        id: plan
+        run: .github/autodev/plan.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: steps.plan.outputs.mode != 'skip'
+        with:
+          python-version: "3.13"
+
+      - name: Install the project with development tools
+        if: steps.plan.outputs.mode != 'skip'
+        run: python -m pip install -r requirements.txt -e ".[dev]"
+
+      - name: Install gitleaks and the git hooks
+        if: steps.plan.outputs.mode != 'skip'
+        run: .github/autodev/install-hooks.sh
+
+      - name: Run the agent
+        if: steps.plan.outputs.mode != 'skip'
+        uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1.0.290
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          bot_name: ${{ env.AUTHOR_NAME }}
+          bot_id: ${{ env.AUTHOR_ID }}
+          prompt: |
+            Read .github/autodev/AGENT.md and follow it exactly.
+
+            Mode: ${{ steps.plan.outputs.mode }}
+            Branch: ${{ steps.plan.outputs.branch }}
+            Pull request: ${{ steps.plan.outputs.pr }}
+          settings: |
+            {
+              "includeCoAuthoredBy": false,
+              "attribution": { "commit": "", "pr": "" }
+            }
+          claude_args: >-
+            --max-turns 150
+            --allowedTools "Read,Write,Edit,MultiEdit,Glob,Grep,TodoWrite,Bash"
+            --disallowedTools "Bash(git push --force:*),Bash(git push -f:*),Bash(git push --force-with-lease:*),Bash(git push --delete:*),Bash(git commit --no-verify:*),Bash(git push --no-verify:*),Bash(gh pr merge:*),Bash(gh pr close:*),Bash(gh api:*),Bash(gh auth:*),Bash(gh secret:*),Bash(gh repo:*),Bash(gh workflow:*),Bash(gh release:*),Bash(gh label:*)"
+
+      - name: Check the result
+        if: always() && steps.plan.outputs.mode != 'skip'
+        run: .github/autodev/verify.sh "${{ steps.plan.outputs.mode }}" "${{ steps.plan.outputs.branch }}" "$AUTHOR_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}
